@@ -44,9 +44,12 @@ struct ActivityView: View {
                 Text(tx.title)
                     .font(Theme.label)
                     .foregroundStyle(Theme.ink)
-                Text(tx.category.capitalized)
-                    .font(Theme.caption)
-                    .foregroundStyle(Theme.inkSecondary)
+                // The server often repeats the category as the title, so only show it when it adds something.
+                if tx.category.caseInsensitiveCompare(tx.title) != .orderedSame {
+                    Text(tx.category.capitalized)
+                        .font(Theme.caption)
+                        .foregroundStyle(Theme.inkSecondary)
+                }
             }
             Spacer()
             Text(String(format: "%@$%.2f", tx.isPositive ? "+" : "-", abs(tx.amount)))
@@ -97,7 +100,11 @@ struct ActivityView: View {
         switch category {
         case "savings":  return "banknote.fill"
         case "income":   return "arrow.down.circle.fill"
-        case "food":     return "fork.knife"
+        case "food", "dining":          return "fork.knife"
+        case "groceries", "essential":  return "cart.fill"
+        case "entertainment":           return "ticket.fill"
+        case "unexpected":              return "exclamationmark.triangle.fill"
+        case "purchase", "want":        return "bag.fill"
         case "tech":     return "headphones"
         default:         return "creditcard.fill"
         }

@@ -3,39 +3,142 @@ import Foundation
 protocol PetServiceProtocol {
     func fetchPetState(petId: String) async throws -> PetState
     func fetchTransactions(petId: String) async throws -> [Transaction]
+    /// The pending "Mochi wants..." prompt, or nil when there isn't one.
+    func fetchOffer(petId: String) async throws -> Offer?
+    /// Whether the physical pet (Raspberry Pi) is online.
+    func fetchDeviceStatus(petId: String) async throws -> DeviceStatus
     func sendAction(petId: String, action: FinancialAction) async throws -> ActionResponse
     func sendHealth(petId: String, payload: HealthPayload) async throws -> ActionResponse
     func sendInteraction(petId: String, interaction: PetInteraction) async throws -> ActionResponse
 }
 
 // MARK: - Live Service
+/// Talks to the deployed FastAPI backend and translates its JSON into the app's models. All the translation lives
+/// here so views and view models never see server shapes.
+///
+/// Financial rules stay on the server: it moves the money in Nessie and updates the pet. The app only presents
+/// the result. Goals are the one exception for now: the server has a single goal and no goal endpoints yet, so
+/// goals live in the local store and a save is credited there after the server accepts it.
 final class PetService: PetServiceProtocol {
     private let api: APIClient
     private let settings: AppSettings
+    private let goals: GoalStoreProtocol
 
-    init(api: APIClient = .shared, settings: AppSettings = .shared) {
+    init(api: APIClient = .shared, settings: AppSettings = .shared, goals: GoalStoreProtocol? = nil) {
         self.api = api
         self.settings = settings
+        self.goals = goals ?? GoalStoreFactory.make(settings: settings)
     }
 
+    // MARK: Reads
     func fetchPetState(petId: String) async throws -> PetState {
-        try await api.get("/api/pets/\(petId)/state", baseURL: settings.baseURL)
+        async let pet: BackendPet = api.get("/pets/\(petId)", baseURL: settings.baseURL)
+        async let finance: BackendFinance = api.get("/pets/\(petId)/finance", baseURL: settings.baseURL)
+        let (backendPet, backendFinance) = try await (pet, finance)
+        return await state(from: backendPet, finance: backendFinance)
     }
 
     func fetchTransactions(petId: String) async throws -> [Transaction] {
-        try await api.get("/api/pets/\(petId)/transactions", baseURL: settings.baseURL)
+        let finance: BackendFinance = try await api.get("/pets/\(petId)/finance", baseURL: settings.baseURL)
+        return finance.recentActivity.map(Self.transaction)
     }
 
+    func fetchOffer(petId: String) async throws -> Offer? {
+        try await api.get("/pets/\(petId)/offer", baseURL: settings.baseURL)
+    }
+
+    func fetchDeviceStatus(petId: String) async throws -> DeviceStatus {
+        try await api.get("/pets/\(petId)/device", baseURL: settings.baseURL)
+    }
+
+    // MARK: Writes
     func sendAction(petId: String, action: FinancialAction) async throws -> ActionResponse {
-        try await api.post("/api/pets/\(petId)/actions", body: action, baseURL: settings.baseURL)
+        let body = BackendDecisionBody(choice: Self.choice(for: action.action), amount: action.amount, offerId: action.offerId)
+        let result: BackendPet = try await api.post("/pets/\(petId)/decision", body: body, baseURL: settings.baseURL)
+
+        // The server has accepted the decision (and moved the money), so this is the one place a save is credited
+        // to a goal. Nothing else may credit it, or the amount is counted twice.
+        var contribution: ContributionResult?
+        if action.action == "save_instead", let goalId = action.goalId, !settings.useServerGoals {
+            contribution = try? await goals.addContribution(
+                petId: petId,
+                goalId: goalId,
+                draft: ContributionDraft(amount: action.amount, source: .savedInstead, note: "Saved instead of spending")
+            )
+        }
+
+        let refreshed = try? await fetchPetState(petId: petId)
+        return ActionResponse(
+            message: contribution?.message ?? result.message ?? "Done.",
+            petState: refreshed,
+            contribution: contribution?.contribution,
+            goal: contribution?.goal,
+            milestoneCrossed: contribution?.milestoneCrossed
+        )
     }
 
     func sendHealth(petId: String, payload: HealthPayload) async throws -> ActionResponse {
-        try await api.post("/api/pets/\(petId)/health", body: payload, baseURL: settings.baseURL)
+        // The server has no Apple Health endpoint yet, so there is nothing to send.
+        ActionResponse(message: "Activity noted on this device. Mochi's server doesn't track Apple Health yet.", petState: nil)
     }
 
     func sendInteraction(petId: String, interaction: PetInteraction) async throws -> ActionResponse {
-        try await api.post("/api/pets/\(petId)/interactions", body: interaction, baseURL: settings.baseURL)
+        let action = interaction.interactionType == "hang_out" ? "play" : "pet"
+        let _: BackendPet = try await api.post("/pets/\(petId)/interact", body: BackendInteractBody(action: action), baseURL: settings.baseURL)
+        let refreshed = try? await fetchPetState(petId: petId)
+        return ActionResponse(message: "Mochi had fun playing!", petState: refreshed)
+    }
+
+    // MARK: Translation
+    private func state(from pet: BackendPet, finance: BackendFinance) async -> PetState {
+        // Goals come from the local store until the server has goal endpoints; fall back to the server's single goal.
+        let local = try? await goals.fetchSnapshot(petId: pet.id)
+        let goal = local?.primaryGoal?.asSavingsGoal ?? pet.goal
+
+        return PetState(
+            petId: pet.id,
+            name: pet.name,
+            mood: Self.moodName(pet.mood),
+            needs: Double(pet.needs),
+            energy: Double(pet.energy),
+            savingsScore: Double(pet.savingsScore),
+            currentBalance: finance.bank.checking ?? 0,
+            emergencyFund: finance.emergencyFund?.current ?? 0,
+            emergencyFundTarget: finance.emergencyFund?.target ?? 500,
+            savingStreak: pet.streak,
+            goal: goal,
+            message: Self.message(for: pet)
+        )
+    }
+
+    /// The server stores mood as 0-100; the app shows a face. This is display bucketing only, not a rule.
+    static func moodName(_ mood: Int) -> String {
+        switch mood {
+        case 85...: "excited"
+        case 60...: "happy"
+        case 40...: "neutral"
+        default:    "sad"
+        }
+    }
+
+    private static func message(for pet: BackendPet) -> String {
+        if pet.mood < 40 { return "\(pet.name) could use a little attention." }
+        if pet.streak > 0 { return "\(pet.name) is proud of your \(pet.streak)-day saving streak!" }
+        return "\(pet.name) is ready when you are."
+    }
+
+    /// The app's action names differ from the server's `choice` values.
+    static func choice(for action: String) -> String {
+        switch action {
+        case "save_instead": "save"
+        case "defer":        "later"
+        default:             action   // "buy"
+        }
+    }
+
+    private static func transaction(_ row: BackendActivity) -> Transaction {
+        let title = row.description?.isEmpty == false ? row.description! : row.category.capitalized
+        return Transaction(id: String(row.id), title: title, amount: row.amount, category: row.category)
     }
 }
 
@@ -46,6 +149,9 @@ final class MockPetService: PetServiceProtocol {
     private let goals: GoalStoreProtocol
     private var states: [String: PetState] = ["mochi": .mockMochi, "byte": .mockByte]
     private var recorded: [Transaction] = []
+    private var offerIndex = 0
+
+    private var currentOffer: Offer { Offer.mockCycle[offerIndex % Offer.mockCycle.count] }
 
     init(goalStore: GoalStoreProtocol = LocalGoalStore.inMemory()) {
         self.goals = goalStore
@@ -59,14 +165,23 @@ final class MockPetService: PetServiceProtocol {
         recorded.reversed() + Transaction.mockTransactions
     }
 
+    func fetchOffer(petId: String) async throws -> Offer? {
+        currentOffer
+    }
+
+    func fetchDeviceStatus(petId: String) async throws -> DeviceStatus {
+        DeviceStatus(connected: true, lastSync: nil, secondsAgo: 1)
+    }
+
     func sendAction(petId: String, action: FinancialAction) async throws -> ActionResponse {
         try await Task.sleep(nanoseconds: 400_000_000)
+        defer { offerIndex += 1 }   // whatever was decided, Mochi moves on to the next want
 
         switch action.action {
         case "save_instead":
             return try await saveInstead(petId: petId, action: action)
         case "buy":
-            recorded.append(Transaction(id: UUID().uuidString, title: "New Headphones", amount: -action.amount, category: "expense"))
+            recorded.append(Transaction(id: UUID().uuidString, title: currentOffer.title, amount: -action.amount, category: "purchase"))
             return ActionResponse(
                 message: "Mochi understands! Just remember to balance needs and wants.",
                 petState: try await currentState(petId: petId)
@@ -135,12 +250,36 @@ final class MockPetService: PetServiceProtocol {
     }
 }
 
+// MARK: - Adaptive service
+/// Picks demo or live data on every call, so the "Use live server" switch takes effect immediately.
+final class AdaptivePetService: PetServiceProtocol {
+    private let settings: AppSettings
+    private let live: PetService
+    private let mock: MockPetService
+
+    init(settings: AppSettings, live: PetService, mock: MockPetService) {
+        self.settings = settings
+        self.live = live
+        self.mock = mock
+    }
+
+    private var current: PetServiceProtocol { settings.useMockData ? mock : live }
+
+    func fetchPetState(petId: String) async throws -> PetState { try await current.fetchPetState(petId: petId) }
+    func fetchTransactions(petId: String) async throws -> [Transaction] { try await current.fetchTransactions(petId: petId) }
+    func fetchOffer(petId: String) async throws -> Offer? { try await current.fetchOffer(petId: petId) }
+    func fetchDeviceStatus(petId: String) async throws -> DeviceStatus { try await current.fetchDeviceStatus(petId: petId) }
+    func sendAction(petId: String, action: FinancialAction) async throws -> ActionResponse { try await current.sendAction(petId: petId, action: action) }
+    func sendHealth(petId: String, payload: HealthPayload) async throws -> ActionResponse { try await current.sendHealth(petId: petId, payload: payload) }
+    func sendInteraction(petId: String, interaction: PetInteraction) async throws -> ActionResponse { try await current.sendInteraction(petId: petId, interaction: interaction) }
+}
+
 // MARK: - Factory
 extension PetService {
-    /// Shared so every view model sees the same mock pet state and the same goals.
+    /// Shared so every view model sees the same demo pet state and the same goals.
     private static let sharedMock = MockPetService(goalStore: GoalStoreFactory.make())
 
     static func makeService(settings: AppSettings = .shared) -> PetServiceProtocol {
-        settings.useMockData ? sharedMock : PetService(settings: settings)
+        AdaptivePetService(settings: settings, live: PetService(settings: settings), mock: sharedMock)
     }
 }

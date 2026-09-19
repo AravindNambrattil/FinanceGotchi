@@ -5,6 +5,7 @@ struct GoalsView: View {
     var goalsVM: GoalsViewModel
 
     @Environment(SessionStore.self) private var session
+    @State private var settings = AppSettings.shared
     @State private var editorMode: GoalEditorView.Mode?
     @State private var contributionGoal: Goal?
 
@@ -403,6 +404,16 @@ struct GoalsView: View {
                     }
                     Spacer(minLength: 0)
                 }
+
+                Toggle(isOn: Binding(get: { !settings.useMockData }, set: { settings.useMockData = !$0 })) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Live server").font(Theme.label).foregroundStyle(Theme.ink)
+                        Text(settings.useMockData ? "Off: showing demo data stored on this device." : "On: real data from Mochi's server and bank.")
+                            .font(Theme.caption)
+                            .foregroundStyle(Theme.inkSecondary)
+                    }
+                }
+                .tint(Theme.indigo)
 
                 HStack(spacing: 10) {
                     Button("Replay intro", action: session.replayIntro)

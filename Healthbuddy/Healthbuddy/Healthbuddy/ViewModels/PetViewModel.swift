@@ -12,6 +12,8 @@ final class PetViewModel {
     var companionPet: PetState?
     var loadState: LoadState = .loading
     var reactionMessage: String?
+    /// Nil until the first check, or when the server can't be reached.
+    var deviceStatus: DeviceStatus?
 
     @ObservationIgnored private let service: PetServiceProtocol
     @ObservationIgnored private let settings: AppSettings
@@ -55,6 +57,10 @@ final class PetViewModel {
         } catch {
             reactionMessage = error.localizedDescription
         }
+    }
+
+    func refreshDevice() async {
+        deviceStatus = try? await service.fetchDeviceStatus(petId: petId)
     }
 
     /// Adopt a pet state returned by an action, without the loading flash of a full reload.

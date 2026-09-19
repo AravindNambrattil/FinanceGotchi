@@ -5,8 +5,6 @@ struct DecisionView: View {
     var petVM: PetViewModel
     var goalsVM: GoalsViewModel
 
-    let scenario = (name: "Mochi wants new headphones", amount: 25.00)
-
     /// Goal the user picked to receive a save. Falls back to the primary goal.
     @State private var saveTargetId: String?
 
@@ -18,27 +16,34 @@ struct DecisionView: View {
 
     var body: some View {
         VStack(spacing: 16) {
-            scenarioCard
-            if goalsVM.openGoals.count > 1 { targetPicker }
-            actionButtons
+            if let offer = viewModel.offer {
+                scenarioCard(offer)
+                if goalsVM.openGoals.count > 1 { targetPicker }
+                actionButtons(offer)
+            } else {
+                noOfferCard
+            }
         }
         .sensoryFeedback(trigger: viewModel.lastContribution?.id) { _, new in new != nil ? .success : nil }
-        .task { await goalsVM.load() }
+        .task {
+            await goalsVM.load()
+            await viewModel.loadOffer()
+        }
     }
 
     // MARK: - Scenario Card
-    private var scenarioCard: some View {
+    private func scenarioCard(_ offer: Offer) -> some View {
         HStack(spacing: 16) {
-            Image(systemName: "headphones")
+            Image(systemName: offer.systemImage)
                 .font(.system(size: 30, weight: .semibold))
                 .frame(width: 72, height: 72)
                 .background(.white.opacity(0.6), in: Circle())
                 .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(scenario.name)
+                Text(offer.prompt)
                     .font(.system(.headline, design: .rounded))
-                Text(String(format: "$%.2f", scenario.amount))
+                Text(String(format: "$%.2f", offer.cost))
                     .font(.system(size: 34, weight: .bold, design: .rounded).monospacedDigit())
                     .foregroundStyle(Theme.navy)
                     .minimumScaleFactor(0.7)
@@ -51,6 +56,26 @@ struct DecisionView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .mellowCard(Theme.yellow)
         .accessibilityElement(children: .combine)
+    }
+
+    private var noOfferCard: some View {
+        VStack(spacing: 12) {
+            MochiView(mood: .happy, size: 84)
+            Text(viewModel.offerError == nil ? "Mochi is happy for now" : "Can't check what Mochi wants")
+                .font(.system(.headline, design: .rounded))
+                .foregroundStyle(Theme.onPastel)
+            Text(viewModel.offerError ?? "Nothing new to decide. Check back soon.")
+                .font(Theme.caption)
+                .foregroundStyle(Theme.onPastel.opacity(0.8))
+                .multilineTextAlignment(.center)
+            if viewModel.offerError != nil {
+                Button("Try again") { Task { await viewModel.loadOffer() } }
+                    .buttonStyle(MellowFilledButtonStyle())
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(24)
+        .mellowCard(Theme.lime)
     }
 
     // MARK: - Save target
@@ -87,9 +112,9 @@ struct DecisionView: View {
     }
 
     // MARK: - Action Buttons
-    private var actionButtons: some View {
+    private func actionButtons(_ offer: Offer) -> some View {
         VStack(spacing: 12) {
-            actionButton(label: "Buy It",      subtitle: "Spend $\(String(format: "%.2f", scenario.amount)) now",           action: "buy",          color: Theme.coral, icon: "cart.fill")
+            actionButton(label: "Buy It",      subtitle: "Spend $\(String(format: "%.2f", offer.cost)) now",                action: "buy",          color: Theme.coral, icon: "cart.fill")
             actionButton(label: "Save It",     subtitle: saveSubtitle,                                                       action: "save_instead", color: Theme.teal,  icon: "banknote.fill")
             actionButton(label: "Maybe Later", subtitle: "Defer the decision for now",                                        action: "defer",        color: Theme.sage,  icon: "clock.fill")
         }
@@ -108,7 +133,6 @@ struct DecisionView: View {
             Task {
                 await viewModel.sendDecision(
                     action: action,
-                    amount: scenario.amount,
                     goalId: action == "save_instead" ? saveTarget?.id : nil
                 )
             }

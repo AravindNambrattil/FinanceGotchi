@@ -22,17 +22,30 @@ can see, care for, and grow with.
 ## Architecture
 
 ```
-Capital One Nessie → Backend (FastAPI + SQLite) → HTTPS → Phone app (iOS) → BLE → ESP32-S3 pet
+Capital One Nessie <-> Backend (FastAPI + SQLite, on Vultr) <-> HTTPS <-> Phone app (iOS)
+                              ^
+                              | HTTPS over Wi-Fi
+                       Physical pet (Raspberry Pi 4B)
 ```
 
-- The ESP32 never talks to Nessie. It only talks BLE to the phone.
+The backend is the hub. The phone and the Pi each talk only to the backend; they never talk to each other, and neither
+talks to Nessie. (Venue Wi-Fi often blocks device-to-device traffic, which would break a direct phone-to-Pi link.)
+There is no Bluetooth. The earlier plan used an ESP32 over BLE; that is superseded, though `README.md` still describes it.
+
+- The Pi never talks to Nessie. It only talks to the backend.
 - **The phone app is the main interface and mostly displays backend state.** Do not put financial algorithms
   (mood/needs/savings rules, goal logic, unexpected-expense handling) in the iOS app — they belong to the backend.
 - The backend (`files/`: `main.py`, `db.py`, `schema.sql`, `setup_db.py`) owns pet state, financial rules, Nessie,
   persistence, and decision history.
 - Shared pet JSON shape (keep iOS models and backend in sync): `id, name, mood, needs, energy, savingsScore,
   goal{name,current,target}, connected`.
-- BLE messages stay tiny: ESP32→phone `{type: BUTTON|MOTION, value}`; phone→ESP32 `{type: PET_UPDATE, mood, message}`.
+- **Pi <-> backend** (existing endpoints, no new server work needed to start):
+  - Pi -> server: `POST /pets/{id}/movement` (`PICKUP | SHAKE | MOVE | IDLE`, never touches finances) and
+    `POST /pets/{id}/interact` (`feed | play | pet`).
+  - Pi <- server: poll `GET /pets/{id}` for mood/needs/energy and `GET /pets/{id}/history` for a new decision (its
+    `id` increases, and it carries a `message`); react when the newest id changes.
+  - Heartbeat: polling `GET /pets/{id}/device/state?device=pi` marks the pet online (`files/device.py`); the app reads
+    `GET /pets/{id}/device` and shows it on the Pet tab. See the "Physical pet" section below.
 
 ## iOS app (`Healthbuddy/Healthbuddy/Healthbuddy/`)
 
@@ -48,7 +61,8 @@ SwiftUI, `@Observable` view models, `TabView` with three tabs: **Pet**, **Money*
 | State | `ViewModels/*` (`GoalsViewModel`, `PetViewModel`, `FinancialViewModel`), `Models/*` (`PetState`, `Goal`, `Contribution`, `Transaction`) |
 | Services | `PetService.swift` (real + stateful `MockPetService`), `GoalStore.swift`, `SessionStore.swift`, `APIClient.swift`, `JSONCoding.swift`, `HealthKitManager.swift` |
 
-- `AppSettings.shared.useMockData` defaults to `true` so the UI works without the Raspberry Pi backend. Keep every
+- `AppSettings.shared.useMockData` defaults to **`false`** (live server); it is persisted. A "Live server" switch on the
+  Goals tab (Account card) and a "Use demo data instead" button on the offline screen flip it at runtime. Keep every
   screen working with mock data and keep `#Preview`s compiling.
 - Screens map to the plan: Home (pet + Mood/Needs/Savings/Energy + goal + Care/Finances/Goals), Financial decision
   (Buy / Save Instead / Later), Financial Wellness (streak, emergency fund, goal, recent activity), physical-pet
@@ -150,3 +164,138 @@ not persist it, and don't make this screen look like it secures anything, until 
 `mood` changes the face; `milestone` adds decorations cumulatively (leaf 25 %, scarf 50 %, sparkles 75 %, party
 hat 100 %). Idle animation stops under Reduce Motion. The app icon is the same face, drawn by a small PIL script.
 The Figma file's own people-illustrations are third-party art and are not used.
+
+## Deployment (Vultr)
+
+The backend runs on one Vultr VM (4 vCPU / 12 GB, Ubuntu 24.04). Vultr credit expires 2026-10-20.
+
+- **URL:** `https://66-42-93-22.sslip.io` (server IP `66.42.93.22`). Interactive docs at `/docs`.
+- **Login:** `ssh root@66.42.93.22` with the SSH key in `~/.ssh/id_ed25519` (public half added in Vultr).
+- **Do not recreate the VM.** The hostname is derived from the IP and its HTTPS certificate is tied to it; a new
+  server means a new IP, a new cert, and shared free hostnames can hit rate limits.
+- **Destroy the VM after the hackathon** in the Vultr dashboard. A stopped server is still billed, and after
+  the credit expires it is $72/mo.
+
+How it fits together: `iOS app -> HTTPS -> Caddy (80/443, auto certificate) -> uvicorn (127.0.0.1:8000) -> SQLite file`,
+and uvicorn calls Nessie over HTTPS. The database is a file, so there is no connection string and no DB server.
+
+| Thing | Where |
+| --- | --- |
+| Code | `/opt/financegotchi/app/` (a copy of `files/`, not a git checkout) |
+| Python env | `/opt/financegotchi/venv/` |
+| Database | `/opt/financegotchi/app/financegotchi.db` (**the only copy**) |
+| Secrets | `/opt/financegotchi/app/.env` (mode 600, owned by `financegotchi`) |
+| Backups | `/opt/financegotchi/backups/` (nightly 03:00, 14 days, same disk) |
+| Service | `systemd` unit `financegotchi`, runs as the `financegotchi` user, **one worker on purpose** (SQLite has one writer) |
+| Firewall | server `ufw` allows only 22, 80, 443 (Vultr's own firewall group is not used) |
+
+Everyday commands:
+
+```bash
+deploy/deploy.sh 66.42.93.22                      # push files/ + deploy/ and re-run setup (safe to repeat)
+ssh root@66.42.93.22 'systemctl status financegotchi --no-pager'
+ssh root@66.42.93.22 'journalctl -u financegotchi -f'     # live logs
+ssh root@66.42.93.22 'systemctl restart financegotchi'
+curl https://66-42-93-22.sslip.io/pets/mochi      # quick health check
+```
+
+`deploy/deploy.sh` never overwrites the server's `financegotchi.db` or `.env`; it excludes them. Backend changes go
+live only when you run it. The deploy files are `deploy/` (`deploy.sh`, `remote-setup.sh`, `financegotchi.service`,
+`Caddyfile.template`), `files/requirements.txt`, and `files/.env.example`.
+
+### Secrets
+
+The Nessie key lives only in the server's `.env`. It was typed through a hidden prompt, never committed and never
+pasted into chat. To set or change it, run this in **your own Terminal** (macOS uses zsh, so the prompt syntax is
+`"K?..."`, not bash's `-p`):
+
+```bash
+read -rs "K?Nessie key: " && echo && [ -n "$K" ] && ssh root@66.42.93.22 "umask 077; printf 'NESSIE_API_KEY=%s\n' '$K' > /opt/financegotchi/app/.env && chown financegotchi:financegotchi /opt/financegotchi/app/.env && systemctl restart financegotchi"; unset K
+```
+
+Lessons from setting this up: `!` commands in Claude Code can't answer prompts, so anything interactive must run in a real
+Terminal; and chain steps with `&&`, not `;`, so a failed step can't let a later one run with an empty variable.
+
+### Nessie
+
+Linked on the server with `setup_nessie.py`, run as the service user:
+`ssh root@66.42.93.22 'cd /opt/financegotchi/app && runuser -u financegotchi -- /opt/financegotchi/venv/bin/python setup_nessie.py'`.
+It found the Nessie customer "Mochi Owner"; Checking is $420 and Savings is $110. `GET /pets/mochi/finance` reports
+`bank.synced: true` and the emergency fund comes from the Nessie savings account. If `.env` is missing or wrong the API
+still works but returns `bank.synced: false` with a reason.
+
+**Writes are not tested on the live server.** A `/decision` or `/expense` moves real Nessie balances and, for the
+seeded "New headphones" offer, resolves it. There is only one offer and no endpoint to create another, so testing a
+decision uses up the demo offer. To rerun the demo from scratch: stop the service, delete `financegotchi.db`, start it
+(it reseeds), and rerun `setup_nessie.py`. That does not reset Nessie's own balances.
+
+### Backend API as deployed
+
+`GET /pets/{id}` -> `{id,name,mood,needs,energy,savingsScore,streak,connected,goal{name,current,target}}` (mood is a number).
+`GET /pets/{id}/finance` -> `{goal,streak,savingsScore,emergencyFund{current,target},bank{synced,checking,savings},recentActivity[]}`;
+activity rows are snake_case (`created_at`, `pet_id`, ...). `GET /pets/{id}/offer`, `GET /pets/{id}/history`,
+`POST /pets/{id}/decision` (`{choice: buy|save|later, amount, offerId?}`), `POST /pets/{id}/expense`,
+`POST /pets/{id}/interact`, `POST /pets/{id}/movement`, and the new `GET/POST /pets/{id}/todos` (`todos.py`).
+The API has **no authentication** and CORS allows every origin; anyone with the URL can change Mochi's data.
+
+### App <-> server: connected
+
+The app talks to the deployed server by default. `Services/PetService.swift` is the only place that knows the server's
+shapes; `Services/ServerModels.swift` holds them (`BackendPet`, `BackendFinance`, ...). Views never see them.
+
+| App call | Server |
+| --- | --- |
+| `fetchPetState` | `GET /pets/{id}` + `GET /pets/{id}/finance`, merged into `PetState` |
+| `fetchTransactions` | `GET /pets/{id}/finance` -> `recentActivity` |
+| `fetchOffer` | `GET /pets/{id}/offer` (nil when nothing is pending) |
+| `sendAction` | `POST /pets/{id}/decision` with `{choice, amount, offerId}`; app `buy/save_instead/defer` -> server `buy/save/later` |
+| `sendInteraction` | `POST /pets/{id}/interact` (`hang_out` -> `play`) |
+| `sendHealth` | **no server endpoint**; returns a local message and sends nothing |
+
+Translation done in the app, display only: numeric mood -> face (85+ excited, 60+ happy, 40+ neutral, else sad), and the
+pet's one-line message (the server has none). Balance and emergency fund come from Nessie via `/finance`.
+
+`AdaptivePetService` chooses demo or live on every call, so flipping the switch needs no restart; `MainTabView`
+reloads everything when it flips. The pill on the Pet tab says LIVE or DEMO. Demo mode is a stateful `MockPetService`
+whose wants cycle (headphones, concert tickets, jacket, takeout), so it can be demoed repeatedly.
+
+Live-mode facts to remember:
+- **The decision card is driven by the server's pending offer.** Deciding resolves it, and the server has one seeded
+  offer and no endpoint to create more, so live mode allows **one decision** until someone adds an offer (reseed to reset,
+  see Nessie section). Then the card shows "Mochi is happy for now".
+- **Goals are still stored on the device**, even in live mode, because the server has one goal and no goal endpoints
+  (`AppSettings.useServerGoals` is the switch for when they exist). After the server accepts a save, `PetService.sendAction`
+  credits the chosen goal locally (the single writer). The server separately credits its own one goal, so the server's
+  goal number and the app's can drift apart; the app shows its own.
+- The companion pet "Byte" does not exist on the server (404), so that card simply hides in live mode.
+- Apple Health activity is not sent anywhere in live mode.
+- **Only reads have been run against the live server.** The decision and interact writes are covered by code, not by a test
+  against the real server.
+
+## Physical pet (Raspberry Pi 4B)
+
+The pet on the desk is a Raspberry Pi 4B with an RGB LCD (16x2), several motion sensors, a buzzer and buttons. It
+connects over Wi-Fi (the team's phone hotspot) to the server. **No Bluetooth, no ESP32, no direct phone link.**
+Everything for it lives in `pi/`; `pi/README.md` is the handoff for whoever wires the hardware.
+
+- **Server side:** `files/device.py`, hooked into `main.py` with two lines.
+  - `GET /pets/{id}/device/state?device=pi` -> `{pet, events[], device}`. `events` is the newest 5 decisions and unexpected
+    expenses, newest first, each with a unique `key`, a `reaction` (`celebrate|happy|wait|relief|sad`) and an LCD-sized
+    `short` caption. Passing `?device=` counts as a heartbeat; without it the call has no side effects.
+  - `GET /pets/{id}/device` -> `{connected, lastSync, secondsAgo}`. Online means a heartbeat within the last 20 s.
+    Use this, not the `connected` field in the pet JSON (that column is set once and never expires).
+  - It returns several events instead of one so two things in the same second can't hide each other.
+- **Pi side:** `pi/financegotchi_pi.py` (network + logic, tested) and `pi/hardware.py`. `ConsoleHardware` runs anywhere;
+  `GroveHardware` is the part the hardware teammate writes. Tests: `python3 -m unittest -v pi/test_pi.py` from `pi/`.
+- **App side:** `PetService.fetchDeviceStatus` and the "Physical Mochi" card on the Pet tab (polls every 5 s). Demo mode
+  shows a connected demo pet.
+- **Rate limiting is essential.** Each `/movement` POST changes stats (SHAKE -2 mood, -3 energy; MOVE +5 energy; PICKUP
+  +1 mood +2 energy; IDLE -1 energy). The Pi client allows a SHAKE every 5 s, MOVE every 10 s, IDLE every 60 s.
+- **A shake starts like a lift.** `MotionClassifier` holds a possible PICKUP for 0.2 s and drops it if it turns into a
+  SHAKE; without that, every shake was reported as a pickup. Thresholds must be tuned on the real sensor, and
+  `SHAKE_G` must be within the sensor's range (some Grove accelerometers stop at +/-1.5 g).
+- **Don't develop against the live server with `/decision` or `/expense`:** they move real Nessie balances and use up
+  the single demo offer. Run `files/` locally instead (see `pi/README.md`).
+- Verified: 24 unit tests, an end-to-end run of the Pi client against a local server (feed, shake, pickup, save,
+  unexpected expense), and the app's card flipping from "Last seen" to "Connected just now" while the client ran against
+  the live server. **Not verified:** anything on real Pi hardware.

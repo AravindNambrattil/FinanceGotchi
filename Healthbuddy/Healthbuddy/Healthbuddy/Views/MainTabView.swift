@@ -6,6 +6,7 @@ struct MainTabView: View {
     @State private var healthVM = HealthViewModel()
     @State private var goalsVM = GoalsViewModel()
     @State private var selection: AppTab = .pet
+    private var settings = AppSettings.shared
 
     var body: some View {
         TabView(selection: $selection) {
@@ -32,6 +33,15 @@ struct MainTabView: View {
             DecisionResultOverlay(viewModel: financialVM, petVM: petVM, goalsVM: goalsVM)
         }
         .animation(.spring(response: 0.4, dampingFraction: 0.75), value: financialVM.decisionResult != nil)
+        .onChange(of: settings.useMockData) {
+            // Demo <-> live changes every number on screen, so reload all of it.
+            Task {
+                await petVM.retry()
+                await financialVM.loadTransactions()
+                await financialVM.loadOffer()
+                await goalsVM.refresh()
+            }
+        }
     }
 
     // MARK: - Money Tab

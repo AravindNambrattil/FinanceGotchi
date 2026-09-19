@@ -20,6 +20,7 @@ struct PetView: View {
                             topBar(pet: pet)
                             ScreenHeader(title: "Hi, I'm \(pet.name)", subtitle: pet.message)
                             heroStage(pet: pet)
+                            deviceCard
                             moodCard(pet: pet)
                             workOnSection(pet: pet)
                             if let companion = petVM.companionPet {
@@ -40,6 +41,13 @@ struct PetView: View {
             }
         }
         .reactionOverlay(message: petVM.reactionMessage, onDismiss: petVM.dismissReaction)
+        // Check whether the physical pet is online every few seconds while this tab is showing.
+        .task(id: AppSettings.shared.useMockData) {
+            while !Task.isCancelled {
+                await petVM.refreshDevice()
+                try? await Task.sleep(for: .seconds(5))
+            }
+        }
         .task {
             async let pet: () = petVM.loadPetState()
             async let companion: () = petVM.loadCompanionPet()
@@ -101,6 +109,36 @@ struct PetView: View {
         }
         .frame(maxWidth: .infinity)
         .frame(height: 250)
+    }
+
+    // MARK: - Physical pet
+    private var deviceCard: some View {
+        let status = petVM.deviceStatus
+        let online = status?.connected == true
+        return HStack(spacing: 12) {
+            Circle()
+                .fill(online ? Theme.teal : Theme.lavender)
+                .frame(width: 12, height: 12)
+                .overlay(Circle().strokeBorder(.white.opacity(0.6), lineWidth: 2))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Physical Mochi")
+                    .font(Theme.label)
+                    .foregroundStyle(Theme.ink)
+                Text(status?.summary ?? "Checking...")
+                    .font(Theme.caption)
+                    .foregroundStyle(Theme.inkSecondary)
+            }
+            Spacer(minLength: 0)
+            Image(systemName: online ? "wifi" : "wifi.slash")
+                .foregroundStyle(online ? Theme.indigo : Theme.inkSecondary)
+                .accessibilityHidden(true)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .mellowCard(elevated: true)
+        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).strokeBorder(Theme.separator, lineWidth: 1))
+        .accessibilityElement(children: .combine)
     }
 
     // MARK: - Mood Card
@@ -253,6 +291,11 @@ struct PetView: View {
                 Task { await petVM.retry() }
             }
             .buttonStyle(MellowFilledButtonStyle())
+            Button("Use demo data instead") {
+                AppSettings.shared.useMockData = true
+            }
+            .font(.system(.subheadline, design: .rounded, weight: .semibold))
+            .foregroundStyle(Theme.link)
         }
         .frame(maxWidth: .infinity, minHeight: 250)
         .padding()
@@ -262,7 +305,9 @@ struct PetView: View {
     @ViewBuilder
     private var mockBadge: some View {
         if AppSettings.shared.useMockData {
-            MellowPill(text: "MOCK", fill: Theme.yellow)
+            MellowPill(text: "DEMO", fill: Theme.yellow)
+        } else {
+            MellowPill(text: "LIVE", fill: Theme.teal)
         }
     }
 }

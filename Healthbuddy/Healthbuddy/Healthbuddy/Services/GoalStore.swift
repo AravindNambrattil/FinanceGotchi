@@ -39,7 +39,7 @@ enum GoalStoreFactory {
     private static let local = LocalGoalStore.persistent()
 
     static func make(settings: AppSettings = .shared) -> GoalStoreProtocol {
-        settings.useMockData ? local : RemoteGoalStore(settings: settings)
+        settings.useServerGoals ? RemoteGoalStore(settings: settings) : local
     }
 }
 
