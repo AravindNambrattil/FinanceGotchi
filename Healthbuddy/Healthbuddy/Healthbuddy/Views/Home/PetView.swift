@@ -3,46 +3,38 @@ import SwiftUI
 struct PetView: View {
     var petVM: PetViewModel
     var healthVM: HealthViewModel
+    /// Called by the "See all" link; the parent switches to the Goals tab.
+    var onSeeAll: () -> Void = {}
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 0) {
+                VStack(alignment: .leading, spacing: 24) {
                     switch petVM.loadState {
                     case .loading:
                         loadingView
                     case .failure(let msg):
                         offlineBanner(message: msg)
-                            .padding()
                     case .idle, .success:
                         if let pet = petVM.petState {
-                            heroSection(pet: pet)
-                            VStack(spacing: 16) {
-                                statsCard(pet: pet)
-                                financialSnapshotCard(pet: pet)
-                                HealthActivityCard(viewModel: healthVM, petId: pet.petId)
-                                if let companion = petVM.companionPet {
-                                    companionCard(companion: companion)
-                                }
+                            topBar(pet: pet)
+                            ScreenHeader(title: "Hi, I'm \(pet.name)", subtitle: pet.message)
+                            heroStage(pet: pet)
+                            moodCard(pet: pet)
+                            workOnSection(pet: pet)
+                            if let companion = petVM.companionPet {
+                                companionCard(companion: companion)
                             }
-                            .padding(.horizontal, 20)
-                            .padding(.bottom, 32)
+                            HealthActivityCard(viewModel: healthVM, petId: pet.petId)
                         }
                     }
                 }
+                .padding(.horizontal, Theme.screenPadding)
+                .padding(.top, 8)
+                .padding(.bottom, 24)
             }
-            .ignoresSafeArea(edges: .top)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Text("FinanceGotchi")
-                        .font(.headline)
-                        .foregroundStyle(.white)
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    mockBadge
-                }
-            }
+            .background(Theme.background)
+            .toolbar(.hidden, for: .navigationBar)
             .refreshable {
                 await petVM.retry()
             }
@@ -56,213 +48,181 @@ struct PetView: View {
         }
     }
 
-    // MARK: - Hero Section
-    private func heroSection(pet: PetState) -> some View {
-        ZStack(alignment: .bottom) {
-            // Background gradient
-            LinearGradient(
-                colors: heroColors(mood: pet.moodExpression),
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
+    // MARK: - Top Bar
+    private func topBar(pet: PetState) -> some View {
+        HStack(spacing: 10) {
+            Text("FinanceGotchi")
+                .font(.system(.subheadline, design: .rounded, weight: .bold))
+                .foregroundStyle(Theme.ink)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(Theme.surface, in: Capsule())
+                .overlay(Capsule().strokeBorder(Theme.separator, lineWidth: 1))
+
+            Spacer()
+
+            mockBadge
+
+            MochiView(name: pet.name, mood: pet.moodExpression, size: 32, animated: false)
+                .frame(width: 44, height: 44)
+                .background(Theme.periwinkle.opacity(0.35), in: Circle())
+        }
+    }
+
+    // MARK: - Hero
+    /// Mochi on a soft stage. The decorations Mochi wears follow the primary goal's progress.
+    private func heroStage(pet: PetState) -> some View {
+        ZStack {
+            Circle()
+                .fill(Theme.periwinkle.opacity(0.22))
+                .frame(width: 230, height: 230)
+            Circle()
+                .fill(Theme.yellow.opacity(0.55))
+                .frame(width: 54, height: 54)
+                .offset(x: -110, y: -70)
+            Circle()
+                .fill(Theme.teal.opacity(0.5))
+                .frame(width: 36, height: 36)
+                .offset(x: 118, y: 60)
+            Image(systemName: "camera.macro")
+                .font(.system(size: 30))
+                .foregroundStyle(Theme.pink)
+                .rotationEffect(.degrees(14))
+                .offset(x: 112, y: -78)
+                .accessibilityHidden(true)
+
+            MochiView(
+                name: pet.name,
+                mood: pet.moodExpression,
+                milestone: GoalMilestone(progress: pet.goal?.progress ?? 0),
+                size: 170
             )
-            .frame(height: 300)
-
-            // Subtle pattern overlay
-            Circle()
-                .fill(.white.opacity(0.06))
-                .frame(width: 240, height: 240)
-                .offset(x: 100, y: -80)
-            Circle()
-                .fill(.white.opacity(0.04))
-                .frame(width: 160, height: 160)
-                .offset(x: -90, y: -20)
-
-            VStack(spacing: 10) {
-                // Avatar bubble
-                ZStack {
-                    Circle()
-                        .fill(.white.opacity(0.2))
-                        .frame(width: 130, height: 130)
-                    Circle()
-                        .fill(.white.opacity(0.15))
-                        .frame(width: 110, height: 110)
-                    Text(moodEmoji(mood: pet.moodExpression))
-                        .font(.system(size: 64))
-                }
-
-                Text(pet.name)
-                    .font(.system(size: 26, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
-
-                Text(pet.message)
-                    .font(.subheadline)
-                    .foregroundStyle(.white.opacity(0.85))
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 32)
-            }
-            .padding(.bottom, 28)
-        }
-    }
-
-    // MARK: - Stats Card
-    private func statsCard(pet: PetState) -> some View {
-        VStack(spacing: 14) {
-            HStack {
-                Text("Wellbeing")
-                    .font(.system(.subheadline, design: .rounded, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                moodPill(mood: pet.moodExpression)
-            }
-
-            VStack(spacing: 12) {
-                statRow(label: "Needs",   value: pet.needs,        color: .orange, icon: "heart.fill")
-                statRow(label: "Energy",  value: pet.energy,       color: .blue,   icon: "bolt.fill")
-                statRow(label: "Savings", value: pet.savingsScore, color: .green,  icon: "banknote.fill")
-            }
-        }
-        .padding(20)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
-        .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(.white.opacity(0.12), lineWidth: 1))
-    }
-
-    private func statRow(label: String, value: Double, color: Color, icon: String) -> some View {
-        VStack(spacing: 6) {
-            HStack(spacing: 6) {
-                Image(systemName: icon)
-                    .font(.caption)
-                    .foregroundStyle(color)
-                    .frame(width: 14)
-                Text(label)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Text("\(Int(value))%")
-                    .font(.caption.bold().monospacedDigit())
-                    .foregroundStyle(color)
-            }
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(color.opacity(0.15))
-                        .frame(height: 8)
-                    Capsule()
-                        .fill(LinearGradient(colors: [color.opacity(0.8), color], startPoint: .leading, endPoint: .trailing))
-                        .frame(width: geo.size.width * (value / 100), height: 8)
-                        .animation(.spring(response: 0.6, dampingFraction: 0.7), value: value)
-                }
-            }
-            .frame(height: 8)
-        }
-    }
-
-    // MARK: - Financial Snapshot
-    private func financialSnapshotCard(pet: PetState) -> some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("Financial Snapshot")
-                    .font(.system(.subheadline, design: .rounded, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                Spacer()
-            }
-            .padding(.horizontal, 20)
-            .padding(.top, 20)
-            .padding(.bottom, 14)
-
-            HStack(spacing: 1) {
-                snapshotCell(
-                    title: "Balance",
-                    value: String(format: "$%.0f", pet.currentBalance),
-                    icon: "dollarsign.circle.fill",
-                    color: .green
-                )
-                snapshotDivider
-                snapshotCell(
-                    title: "Emergency",
-                    value: String(format: "$%.0f", pet.emergencyFund),
-                    icon: "shield.fill",
-                    color: .blue
-                )
-                snapshotDivider
-                if let goal = pet.goal {
-                    snapshotCell(
-                        title: goal.name,
-                        value: String(format: "$%.0f", goal.current),
-                        icon: "star.fill",
-                        color: .purple
-                    )
-                } else {
-                    snapshotCell(title: "Goal", value: "Set one!", icon: "plus.circle.fill", color: .secondary)
-                }
-            }
-            .padding(.bottom, 20)
-        }
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
-        .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(.white.opacity(0.12), lineWidth: 1))
-    }
-
-    private var snapshotDivider: some View {
-        Rectangle()
-            .fill(Color.primary.opacity(0.08))
-            .frame(width: 1, height: 48)
-    }
-
-    private func snapshotCell(title: String, value: String, icon: String, color: Color) -> some View {
-        VStack(spacing: 6) {
-            Image(systemName: icon)
-                .font(.title3)
-                .foregroundStyle(color)
-            Text(value)
-                .font(.system(.callout, design: .rounded, weight: .bold).monospacedDigit())
-                .foregroundStyle(.primary)
-                .minimumScaleFactor(0.65)
-                .lineLimit(1)
-            Text(title)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+            .offset(y: 8)
         }
         .frame(maxWidth: .infinity)
+        .frame(height: 250)
+    }
+
+    // MARK: - Mood Card
+    private func moodCard(pet: PetState) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            StatBubble(value: pet.moodExpression.label, label: "Mood") {
+                MochiView(name: pet.name, mood: pet.moodExpression, size: 44, animated: false)
+                    .offset(y: 1)
+            }
+            StatBubble(value: "\(Int(pet.needs))%", label: "Needs", ring: pet.needs / 100) {
+                Image(systemName: "heart.fill").font(.system(size: 22))
+            }
+            StatBubble(value: "\(Int(pet.savingsScore))%", label: "Savings", ring: pet.savingsScore / 100) {
+                Image(systemName: "banknote.fill").font(.system(size: 22))
+            }
+            StatBubble(value: "\(Int(pet.energy))%", label: "Energy", ring: pet.energy / 100) {
+                Image(systemName: "bolt.fill").font(.system(size: 22))
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 20)
+        .mellowCard(Theme.lime)
+        .overlay(alignment: .topTrailing) {
+            Image(systemName: "camera.macro")
+                .font(.system(size: 40))
+                .foregroundStyle(Theme.pink)
+                .rotationEffect(.degrees(-12))
+                .offset(x: 8, y: -20)
+                .accessibilityHidden(true)
+        }
+    }
+
+    // MARK: - What Mochi is working on
+    private func workOnSection(pet: PetState) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            MellowSectionHeader(
+                title: "What is \(pet.name) working on?",
+                actionTitle: "See all",
+                action: onSeeAll
+            )
+
+            HStack(alignment: .top, spacing: 12) {
+                VStack(spacing: 12) {
+                    goalTile(pet: pet)
+                    PastelTile(
+                        title: "Balance",
+                        value: Money.string(pet.currentBalance),
+                        caption: "Checking",
+                        systemImage: "dollarsign.circle.fill",
+                        fill: Theme.coral
+                    )
+                }
+                VStack(spacing: 12) {
+                    PastelTile(
+                        title: "Saving streak",
+                        value: "\(pet.savingStreak) day\(pet.savingStreak == 1 ? "" : "s")",
+                        caption: pet.savingStreak > 0 ? "Keep it going" : "Save today to start",
+                        systemImage: "flame.fill",
+                        fill: Theme.yellow
+                    )
+                    PastelTile(
+                        title: "Emergency fund",
+                        value: Money.string(pet.emergencyFund),
+                        caption: "of \(Money.string(pet.emergencyFundTarget))",
+                        systemImage: "shield.fill",
+                        fill: Theme.periwinkle,
+                        progress: pet.emergencyFund / max(pet.emergencyFundTarget, 1),
+                        minHeight: 190
+                    )
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func goalTile(pet: PetState) -> some View {
+        if let goal = pet.goal {
+            PastelTile(
+                title: "\(goal.name) goal",
+                value: Money.string(goal.current),
+                caption: "of \(Money.string(goal.target)) · \(goal.progressPercent)%",
+                systemImage: "star.fill",
+                fill: Theme.teal,
+                progress: goal.progress,
+                minHeight: 190
+            )
+        } else {
+            PastelTile(
+                title: "Goal",
+                value: "Set one!",
+                systemImage: "plus.circle.fill",
+                fill: Theme.teal,
+                minHeight: 190
+            )
+        }
     }
 
     // MARK: - Companion Card
     private func companionCard(companion: PetState) -> some View {
         HStack(spacing: 14) {
-            ZStack {
-                Circle()
-                    .fill(LinearGradient(
-                        colors: heroColors(mood: companion.moodExpression),
-                        startPoint: .topLeading, endPoint: .bottomTrailing
-                    ))
-                    .frame(width: 52, height: 52)
-                Text(moodEmoji(mood: companion.moodExpression))
-                    .font(.system(size: 28))
-            }
+            MochiView(name: companion.name, mood: companion.moodExpression, size: 40, animated: false, tint: Theme.lavender)
+                .frame(width: 56, height: 56)
+                .background(Theme.pink.opacity(0.45), in: Circle())
 
             VStack(alignment: .leading, spacing: 3) {
                 Text("\(companion.name) is here!")
-                    .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                    .font(Theme.label)
+                    .foregroundStyle(Theme.ink)
                 Text(companion.message)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(Theme.caption)
+                    .foregroundStyle(Theme.inkSecondary)
                     .lineLimit(2)
             }
-            Spacer()
-            Button {
+            Spacer(minLength: 8)
+            Button("Hang Out") {
                 Task { await petVM.interactWithCompanion() }
-            } label: {
-                Text("Hang Out")
-                    .font(.caption.bold())
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background(Color.indigo)
-                    .foregroundStyle(.white)
-                    .clipShape(Capsule())
             }
+            .buttonStyle(MellowFilledButtonStyle())
         }
         .padding(16)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
-        .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(.white.opacity(0.12), lineWidth: 1))
+        .mellowCard(elevated: true)
+        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).strokeBorder(Theme.separator, lineWidth: 1))
     }
 
     // MARK: - Loading
@@ -271,8 +231,8 @@ struct PetView: View {
             ProgressView()
                 .scaleEffect(1.2)
             Text("Fetching Mochi...")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .font(Theme.section)
+                .foregroundStyle(Theme.inkSecondary)
         }
         .frame(maxWidth: .infinity, minHeight: 300)
     }
@@ -282,16 +242,17 @@ struct PetView: View {
         VStack(spacing: 16) {
             Image(systemName: "wifi.slash")
                 .font(.system(size: 40))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.inkSecondary)
             Text("Can't reach Mochi right now.")
-                .font(.headline)
+                .font(.system(.headline, design: .rounded))
+                .foregroundStyle(Theme.ink)
             Text("Check your Wi-Fi connection.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .font(Theme.section)
+                .foregroundStyle(Theme.inkSecondary)
             Button("Retry") {
                 Task { await petVM.retry() }
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(MellowFilledButtonStyle())
         }
         .frame(maxWidth: .infinity, minHeight: 250)
         .padding()
@@ -301,49 +262,7 @@ struct PetView: View {
     @ViewBuilder
     private var mockBadge: some View {
         if AppSettings.shared.useMockData {
-            Text("MOCK")
-                .font(.caption2.bold())
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
-                .background(.white.opacity(0.25))
-                .foregroundStyle(.white)
-                .clipShape(Capsule())
-        }
-    }
-
-    // MARK: - Mood Pill
-    private func moodPill(mood: PetState.MoodExpression) -> some View {
-        let (label, color): (String, Color) = switch mood {
-        case .happy:   ("Happy", .yellow)
-        case .excited: ("Excited", .pink)
-        case .neutral: ("Okay", .gray)
-        case .sad:     ("Sad", .blue)
-        }
-        return Text(label)
-            .font(.caption.bold())
-            .padding(.horizontal, 10)
-            .padding(.vertical, 4)
-            .background(color.opacity(0.18))
-            .foregroundStyle(color)
-            .clipShape(Capsule())
-    }
-
-    // MARK: - Helpers
-    private func moodEmoji(mood: PetState.MoodExpression) -> String {
-        switch mood {
-        case .happy:   return "😊"
-        case .sad:     return "😢"
-        case .neutral: return "😐"
-        case .excited: return "🤩"
-        }
-    }
-
-    private func heroColors(mood: PetState.MoodExpression) -> [Color] {
-        switch mood {
-        case .happy:   return [Color(red: 0.98, green: 0.72, blue: 0.25), Color(red: 0.98, green: 0.48, blue: 0.22)]
-        case .sad:     return [Color(red: 0.3, green: 0.45, blue: 0.9), Color(red: 0.2, green: 0.3, blue: 0.75)]
-        case .neutral: return [Color(red: 0.5, green: 0.55, blue: 0.65), Color(red: 0.38, green: 0.42, blue: 0.52)]
-        case .excited: return [Color(red: 0.85, green: 0.3, blue: 0.75), Color(red: 0.55, green: 0.2, blue: 0.9)]
+            MellowPill(text: "MOCK", fill: Theme.yellow)
         }
     }
 }

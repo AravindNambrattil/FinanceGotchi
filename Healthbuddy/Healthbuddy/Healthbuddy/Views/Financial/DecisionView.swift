@@ -3,65 +3,101 @@ import SwiftUI
 struct DecisionView: View {
     var viewModel: FinancialViewModel
     var petVM: PetViewModel
+    var goalsVM: GoalsViewModel
 
     let scenario = (name: "Mochi wants new headphones", amount: 25.00)
 
+    /// Goal the user picked to receive a save. Falls back to the primary goal.
+    @State private var saveTargetId: String?
+
+    private var saveTarget: Goal? {
+        goalsVM.openGoals.first { $0.id == saveTargetId }
+            ?? goalsVM.primaryGoal.flatMap { $0.status == .active ? $0 : nil }
+            ?? goalsVM.openGoals.first
+    }
+
     var body: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: 16) {
             scenarioCard
+            if goalsVM.openGoals.count > 1 { targetPicker }
             actionButtons
         }
-        .overlay {
-            if let result = viewModel.decisionResult {
-                resultOverlay(message: result)
-            }
-        }
-        .animation(.spring(response: 0.4, dampingFraction: 0.75), value: viewModel.decisionResult != nil)
+        .sensoryFeedback(trigger: viewModel.lastContribution?.id) { _, new in new != nil ? .success : nil }
+        .task { await goalsVM.load() }
     }
 
     // MARK: - Scenario Card
     private var scenarioCard: some View {
-        VStack(spacing: 14) {
-            ZStack {
-                Circle()
-                    .fill(LinearGradient(
-                        colors: [Color.indigo.opacity(0.2), Color.purple.opacity(0.15)],
-                        startPoint: .topLeading, endPoint: .bottomTrailing
-                    ))
-                    .frame(width: 80, height: 80)
-                Text("💸")
-                    .font(.system(size: 40))
-            }
+        HStack(spacing: 16) {
+            Image(systemName: "headphones")
+                .font(.system(size: 30, weight: .semibold))
+                .frame(width: 72, height: 72)
+                .background(.white.opacity(0.6), in: Circle())
+                .accessibilityHidden(true)
 
-            VStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(scenario.name)
-                    .font(.system(.title3, design: .rounded, weight: .bold))
-                    .multilineTextAlignment(.center)
+                    .font(.system(.headline, design: .rounded))
                 Text(String(format: "$%.2f", scenario.amount))
-                    .font(.system(size: 32, weight: .black, design: .rounded).monospacedDigit())
-                    .foregroundStyle(.indigo)
+                    .font(.system(size: 34, weight: .bold, design: .rounded).monospacedDigit())
+                    .foregroundStyle(Theme.navy)
+                    .minimumScaleFactor(0.7)
+                    .lineLimit(1)
             }
+            Spacer(minLength: 0)
         }
-        .padding(.vertical, 28)
-        .padding(.horizontal, 20)
-        .frame(maxWidth: .infinity)
-        .background(
-            RoundedRectangle(cornerRadius: 20)
-                .fill(.regularMaterial)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 20)
-                        .strokeBorder(Color.indigo.opacity(0.15), lineWidth: 1)
-                )
-        )
+        .foregroundStyle(Theme.onPastel)
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .mellowCard(Theme.yellow)
+        .accessibilityElement(children: .combine)
+    }
+
+    // MARK: - Save target
+    private var targetPicker: some View {
+        HStack {
+            Text("If you save it, it goes to")
+                .font(Theme.caption)
+                .foregroundStyle(Theme.inkSecondary)
+            Spacer(minLength: 8)
+            Menu {
+                ForEach(goalsVM.openGoals) { goal in
+                    Button {
+                        saveTargetId = goal.id
+                    } label: {
+                        Label(goal.name, systemImage: saveTarget?.id == goal.id ? "checkmark" : goal.symbol)
+                    }
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: saveTarget?.symbol ?? "star.fill")
+                    Text(saveTarget?.name ?? "Pick a goal")
+                    Image(systemName: "chevron.up.chevron.down").font(.caption2)
+                }
+                .font(.system(.footnote, design: .rounded, weight: .bold))
+                .foregroundStyle(Theme.onPastel)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .background(Theme.teal.opacity(0.6), in: Capsule())
+            }
+            .accessibilityLabel("Goal to save into")
+            .accessibilityValue(saveTarget?.name ?? "None")
+        }
+        .padding(.horizontal, 4)
     }
 
     // MARK: - Action Buttons
     private var actionButtons: some View {
         VStack(spacing: 12) {
-            actionButton(label: "Buy It",     subtitle: "Spend $\(String(format: "%.2f", scenario.amount)) now",  action: "buy",          color: .red,    icon: "cart.fill")
-            actionButton(label: "Save It",    subtitle: "Put it towards your goal instead",                      action: "save_instead", color: .green,  icon: "banknote.fill")
-            actionButton(label: "Maybe Later", subtitle: "Defer the decision for now",                           action: "defer",        color: .orange, icon: "clock.fill")
+            actionButton(label: "Buy It",      subtitle: "Spend $\(String(format: "%.2f", scenario.amount)) now",           action: "buy",          color: Theme.coral, icon: "cart.fill")
+            actionButton(label: "Save It",     subtitle: saveSubtitle,                                                       action: "save_instead", color: Theme.teal,  icon: "banknote.fill")
+            actionButton(label: "Maybe Later", subtitle: "Defer the decision for now",                                        action: "defer",        color: Theme.sage,  icon: "clock.fill")
         }
+    }
+
+    private var saveSubtitle: String {
+        if let goal = saveTarget { return "Put it towards \(goal.name) instead" }
+        return "Create a goal first"
     }
 
     private func actionButton(label: String, subtitle: String, action: String, color: Color, icon: String) -> some View {
@@ -69,29 +105,28 @@ struct DecisionView: View {
         let isDisabled = viewModel.isSendingAction
 
         return Button {
-            Task { await viewModel.sendDecision(action: action, amount: scenario.amount) }
+            Task {
+                await viewModel.sendDecision(
+                    action: action,
+                    amount: scenario.amount,
+                    goalId: action == "save_instead" ? saveTarget?.id : nil
+                )
+            }
         } label: {
             HStack(spacing: 14) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(isSelected ? .white.opacity(0.25) : color.opacity(0.15))
-                        .frame(width: 40, height: 40)
-                    Image(systemName: icon)
-                        .font(.subheadline)
-                        .foregroundStyle(isSelected ? .white : color)
-                }
+                IconTile(systemImage: icon, fill: isSelected ? .white.opacity(0.9) : color, size: 44)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(label)
                         .font(.system(.subheadline, design: .rounded, weight: .bold))
                     Text(subtitle)
-                        .font(.caption)
+                        .font(Theme.caption)
                         .opacity(0.75)
                 }
                 Spacer()
 
                 if isSelected && viewModel.isSendingAction {
-                    ProgressView().tint(isSelected ? .white : color)
+                    ProgressView().tint(isSelected ? .white : Theme.onPastel)
                 } else {
                     Image(systemName: "chevron.right")
                         .font(.caption.bold())
@@ -100,61 +135,24 @@ struct DecisionView: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
+            .frame(maxWidth: .infinity)
+            .foregroundStyle(isSelected ? Color.white : Theme.onPastel)
             .background(
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(isSelected ? color : color.opacity(0.1))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16)
-                            .strokeBorder(isSelected ? .clear : color.opacity(0.2), lineWidth: 1)
-                    )
+                isSelected ? Theme.navy : color.opacity(0.28),
+                in: RoundedRectangle(cornerRadius: Theme.tileRadius, style: .continuous)
             )
-            .foregroundStyle(isSelected ? .white : color)
         }
+        .buttonStyle(.plain)
         .disabled(isDisabled)
         .animation(.easeInOut(duration: 0.18), value: isSelected)
-    }
-
-    // MARK: - Result Overlay
-    private func resultOverlay(message: String) -> some View {
-        ZStack {
-            Color.black.opacity(0.35)
-                .ignoresSafeArea()
-
-            VStack(spacing: 20) {
-                Text("🎉")
-                    .font(.system(size: 56))
-                Text(message)
-                    .font(.system(.headline, design: .rounded))
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 24)
-                Button {
-                    viewModel.clearDecisionResult()
-                    Task { await petVM.loadPetState() }
-                } label: {
-                    Text("Got it!")
-                        .font(.system(.subheadline, design: .rounded, weight: .bold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(Color.indigo)
-                        .foregroundStyle(.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 14))
-                }
-                .padding(.horizontal, 32)
-            }
-            .padding(32)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24))
-            .overlay(RoundedRectangle(cornerRadius: 24).strokeBorder(.white.opacity(0.15), lineWidth: 1))
-            .shadow(color: .black.opacity(0.25), radius: 24, x: 0, y: 8)
-            .padding(.horizontal, 24)
-            .transition(.scale(scale: 0.88).combined(with: .opacity))
-        }
     }
 }
 
 #Preview {
     DecisionView(
         viewModel: FinancialViewModel(service: MockPetService()),
-        petVM: .previewLoaded()
+        petVM: .previewLoaded(),
+        goalsVM: .previewLoaded()
     )
     .padding()
 }

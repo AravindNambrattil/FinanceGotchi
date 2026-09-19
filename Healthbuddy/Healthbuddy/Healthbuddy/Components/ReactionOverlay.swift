@@ -6,27 +6,23 @@ struct ReactionOverlay: View {
 
     var body: some View {
         VStack(spacing: 16) {
-            Text("🎉")
-                .font(.system(size: 48))
+            MochiView(mood: .excited, size: 84)
 
             Text(message)
-                .font(.headline)
+                .font(.system(.headline, design: .rounded))
+                .foregroundStyle(Theme.ink)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 24)
 
             Button(action: onDismiss) {
                 Text("Got it!")
-                    .font(.subheadline.bold())
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .background(Color.accentColor)
-                    .foregroundStyle(.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
             }
+            .buttonStyle(MellowFilledButtonStyle())
             .padding(.horizontal, 32)
         }
         .padding(32)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24))
+        .mellowCard(Theme.surface, radius: 32)
         .padding(.horizontal, 24)
         .shadow(radius: 20)
         .transition(.scale.combined(with: .opacity))

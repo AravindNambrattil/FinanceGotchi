@@ -4,7 +4,7 @@ import SwiftUI
 struct HealthbuddyApp: App {
     var body: some Scene {
         WindowGroup {
-            MainTabView()
+            RootView()
         }
     }
 }

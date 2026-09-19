@@ -43,11 +43,47 @@ actor APIClient {
         body: Body,
         baseURL: URL
     ) async throws -> Response {
+        try await send("POST", path, body: body, baseURL: baseURL)
+    }
+
+    // MARK: - PUT
+    func put<Body: Encodable, Response: Decodable>(
+        _ path: String,
+        body: Body,
+        baseURL: URL
+    ) async throws -> Response {
+        try await send("PUT", path, body: body, baseURL: baseURL)
+    }
+
+    // MARK: - DELETE
+    /// `query` is passed separately because `appendingPathComponent` would percent-encode a `?` in `path`.
+    func delete<Response: Decodable>(
+        _ path: String,
+        query: [URLQueryItem] = [],
+        baseURL: URL
+    ) async throws -> Response {
+        var components = URLComponents(url: baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)
+        if !query.isEmpty { components?.queryItems = query }
+        guard let url = components?.url else { throw APIError.invalidURL }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+        let (data, response) = try await fetch(urlRequest: request)
+        try validate(response: response)
+        return try decode(data)
+    }
+
+    private func send<Body: Encodable, Response: Decodable>(
+        _ method: String,
+        _ path: String,
+        body: Body,
+        baseURL: URL
+    ) async throws -> Response {
         let url = baseURL.appendingPathComponent(path)
         var request = URLRequest(url: url)
-        request.httpMethod = "POST"
+        request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(body)
+        request.httpBody = try JSONCoding.makeEncoder().encode(body)
 
         let (data, response) = try await fetch(urlRequest: request)
         try validate(response: response)
@@ -80,7 +116,7 @@ actor APIClient {
 
     private func decode<T: Decodable>(_ data: Data) throws -> T {
         do {
-            return try JSONDecoder().decode(T.self, from: data)
+            return try JSONCoding.makeDecoder().decode(T.self, from: data)
         } catch {
             throw APIError.decodingFailed(error)
         }

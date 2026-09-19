@@ -4,57 +4,60 @@ struct MainTabView: View {
     @State private var petVM = PetViewModel()
     @State private var financialVM = FinancialViewModel()
     @State private var healthVM = HealthViewModel()
+    @State private var goalsVM = GoalsViewModel()
+    @State private var selection: AppTab = .pet
 
     var body: some View {
-        TabView {
-            PetView(petVM: petVM, healthVM: healthVM)
-                .tabItem {
-                    Label("Pet", systemImage: "pawprint.fill")
-                }
+        TabView(selection: $selection) {
+            Tab(AppTab.pet.title, systemImage: AppTab.pet.systemImage, value: AppTab.pet) {
+                PetView(petVM: petVM, healthVM: healthVM, onSeeAll: { selection = .goals })
+                    .toolbarVisibility(.hidden, for: .tabBar)
+            }
 
-            moneyTab
-                .tabItem {
-                    Label("Money", systemImage: "dollarsign.circle.fill")
-                }
+            Tab(AppTab.money.title, systemImage: AppTab.money.systemImage, value: AppTab.money) {
+                moneyTab
+                    .toolbarVisibility(.hidden, for: .tabBar)
+            }
 
-            GoalsView(petVM: petVM)
-                .tabItem {
-                    Label("Goals", systemImage: "chart.line.uptrend.xyaxis")
-                }
+            Tab(AppTab.goals.title, systemImage: AppTab.goals.systemImage, value: AppTab.goals) {
+                GoalsView(petVM: petVM, goalsVM: goalsVM)
+                    .toolbarVisibility(.hidden, for: .tabBar)
+            }
         }
+        .safeAreaInset(edge: .bottom) {
+            FloatingTabBar(selection: $selection)
+        }
+        .background(Theme.background)
+        .overlay {
+            DecisionResultOverlay(viewModel: financialVM, petVM: petVM, goalsVM: goalsVM)
+        }
+        .animation(.spring(response: 0.4, dampingFraction: 0.75), value: financialVM.decisionResult != nil)
     }
 
     // MARK: - Money Tab
-    @ViewBuilder
     private var moneyTab: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    sectionHeader("Financial Decision")
-                    DecisionView(viewModel: financialVM, petVM: petVM)
-                        .padding(.horizontal, 20)
+                VStack(alignment: .leading, spacing: 24) {
+                    ScreenHeader(title: "Money", subtitle: "Every choice helps Mochi grow.")
 
-                    sectionHeader("Recent Transactions")
-                        .padding(.top, 8)
-                    ActivityView(viewModel: financialVM)
-                        .padding(.horizontal, 20)
-                        .padding(.bottom, 32)
+                    VStack(alignment: .leading, spacing: 12) {
+                        MellowSectionHeader(title: "Financial decision")
+                        DecisionView(viewModel: financialVM, petVM: petVM, goalsVM: goalsVM)
+                    }
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        MellowSectionHeader(title: "Recent transactions")
+                        ActivityView(viewModel: financialVM)
+                    }
                 }
+                .padding(.horizontal, Theme.screenPadding)
+                .padding(.top, 8)
+                .padding(.bottom, 24)
             }
-            .navigationTitle("Money")
-            .navigationBarTitleDisplayMode(.large)
+            .background(Theme.background)
+            .toolbar(.hidden, for: .navigationBar)
         }
-    }
-
-    private func sectionHeader(_ title: String) -> some View {
-        Text(title)
-            .font(.system(.footnote, design: .rounded, weight: .semibold))
-            .foregroundStyle(.secondary)
-            .textCase(.uppercase)
-            .tracking(0.5)
-            .padding(.horizontal, 20)
-            .padding(.top, 24)
-            .padding(.bottom, 8)
     }
 }
 

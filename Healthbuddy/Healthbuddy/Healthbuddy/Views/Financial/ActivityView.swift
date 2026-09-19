@@ -26,40 +26,36 @@ struct ActivityView: View {
                 transactionRow(tx)
                 if index < viewModel.transactions.count - 1 {
                     Divider()
-                        .padding(.leading, 72)
+                        .overlay(Theme.separator)
+                        .padding(.leading, 76)
                         .padding(.trailing, 16)
                 }
             }
         }
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
-        .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(.white.opacity(0.1), lineWidth: 1))
+        .mellowCard(elevated: true)
+        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).strokeBorder(Theme.separator, lineWidth: 1))
     }
 
     private func transactionRow(_ tx: Transaction) -> some View {
         HStack(spacing: 14) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(tx.isPositive ? Color.green.opacity(0.12) : Color.red.opacity(0.1))
-                    .frame(width: 44, height: 44)
-                Image(systemName: categoryIcon(tx.category))
-                    .font(.subheadline)
-                    .foregroundStyle(tx.isPositive ? .green : .red)
-            }
+            IconTile(systemImage: categoryIcon(tx.category), fill: tx.isPositive ? Theme.sage : Theme.coral.opacity(0.45))
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(tx.title)
-                    .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                    .font(Theme.label)
+                    .foregroundStyle(Theme.ink)
                 Text(tx.category.capitalized)
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+                    .font(Theme.caption)
+                    .foregroundStyle(Theme.inkSecondary)
             }
             Spacer()
             Text(String(format: "%@$%.2f", tx.isPositive ? "+" : "-", abs(tx.amount)))
                 .font(.system(.subheadline, design: .rounded, weight: .bold).monospacedDigit())
-                .foregroundStyle(tx.isPositive ? .green : .primary)
+                .foregroundStyle(tx.isPositive ? Theme.link : Theme.ink)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
+        .accessibilityElement(children: .combine)
     }
 
     // MARK: - Error
@@ -67,17 +63,18 @@ struct ActivityView: View {
         VStack(spacing: 16) {
             Image(systemName: "wifi.slash")
                 .font(.system(size: 36))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.inkSecondary)
             Text("Can't load transactions")
-                .font(.headline)
+                .font(.system(.headline, design: .rounded))
+                .foregroundStyle(Theme.ink)
             Text(message)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(Theme.caption)
+                .foregroundStyle(Theme.inkSecondary)
                 .multilineTextAlignment(.center)
             Button("Retry") {
                 Task { await viewModel.loadTransactions() }
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(MellowFilledButtonStyle())
         }
         .frame(maxWidth: .infinity, minHeight: 200)
     }
@@ -87,10 +84,10 @@ struct ActivityView: View {
         VStack(spacing: 12) {
             Image(systemName: "tray")
                 .font(.system(size: 36))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.inkSecondary)
             Text("No transactions yet")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .font(Theme.section)
+                .foregroundStyle(Theme.inkSecondary)
         }
         .frame(maxWidth: .infinity, minHeight: 200)
     }

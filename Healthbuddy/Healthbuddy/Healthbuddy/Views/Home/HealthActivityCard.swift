@@ -7,17 +7,11 @@ struct HealthActivityCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
-                HStack(spacing: 8) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 10)
-                            .fill(Color.pink.opacity(0.15))
-                            .frame(width: 36, height: 36)
-                        Image(systemName: "figure.run")
-                            .font(.subheadline)
-                            .foregroundStyle(.pink)
-                    }
+                HStack(spacing: 12) {
+                    IconTile(systemImage: "figure.run", fill: Theme.coral.opacity(0.45), size: 40)
                     Text("Activity Today")
-                        .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                        .font(Theme.label)
+                        .foregroundStyle(Theme.ink)
                 }
                 Spacer()
                 if viewModel.isAuthorized {
@@ -33,39 +27,41 @@ struct HealthActivityCard: View {
 
             if let message = viewModel.syncMessage {
                 Text(message)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(Theme.caption)
+                    .foregroundStyle(Theme.inkSecondary)
             }
         }
         .padding(20)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
-        .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(.white.opacity(0.1), lineWidth: 1))
+        .mellowCard(elevated: true)
+        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).strokeBorder(Theme.separator, lineWidth: 1))
     }
 
     // MARK: - Metrics
     private var metricsRow: some View {
         HStack(spacing: 0) {
-            metricCell(value: "\(viewModel.steps)", unit: "steps", icon: "shoeprints.fill", color: .green)
-            Rectangle().fill(Color.primary.opacity(0.08)).frame(width: 1, height: 44)
-            metricCell(value: "\(Int(viewModel.activeEnergyKcal))", unit: "kcal", icon: "flame.fill", color: .orange)
-            Rectangle().fill(Color.primary.opacity(0.08)).frame(width: 1, height: 44)
-            metricCell(value: "\(viewModel.exerciseMinutes)", unit: "min", icon: "bolt.heart.fill", color: .pink)
+            metricCell(value: "\(viewModel.steps)", unit: "steps", icon: "shoeprints.fill")
+            Rectangle().fill(Theme.separator).frame(width: 1, height: 44)
+            metricCell(value: "\(Int(viewModel.activeEnergyKcal))", unit: "kcal", icon: "flame.fill")
+            Rectangle().fill(Theme.separator).frame(width: 1, height: 44)
+            metricCell(value: "\(viewModel.exerciseMinutes)", unit: "min", icon: "bolt.heart.fill")
         }
         .padding(.vertical, 4)
     }
 
-    private func metricCell(value: String, unit: String, icon: String, color: Color) -> some View {
+    private func metricCell(value: String, unit: String, icon: String) -> some View {
         VStack(spacing: 5) {
             Image(systemName: icon)
                 .font(.title3)
-                .foregroundStyle(color)
+                .foregroundStyle(Theme.indigo)
             Text(value)
                 .font(.system(.headline, design: .rounded, weight: .bold).monospacedDigit())
+                .foregroundStyle(Theme.ink)
             Text(unit)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+                .font(.system(.caption2, design: .rounded))
+                .foregroundStyle(Theme.inkSecondary)
         }
         .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .combine)
     }
 
     // MARK: - Sync Button
@@ -81,14 +77,9 @@ struct HealthActivityCard: View {
                         .font(.caption)
                 }
                 Text(viewModel.isSyncing ? "Syncing" : "Sync")
-                    .font(.caption.bold())
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(Color.pink.opacity(0.12))
-            .foregroundStyle(.pink)
-            .clipShape(Capsule())
         }
+        .buttonStyle(MellowFilledButtonStyle(fill: Theme.sage, foreground: Theme.onPastel))
         .disabled(viewModel.isSyncing)
     }
 
@@ -100,13 +91,9 @@ struct HealthActivityCard: View {
             HStack(spacing: 8) {
                 Image(systemName: "heart.text.square.fill")
                 Text("Connect Apple Health")
-                    .font(.system(.subheadline, design: .rounded, weight: .semibold))
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 12)
-            .background(Color.pink.opacity(0.12))
-            .foregroundStyle(.pink)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
         }
+        .buttonStyle(MellowFilledButtonStyle())
     }
 }

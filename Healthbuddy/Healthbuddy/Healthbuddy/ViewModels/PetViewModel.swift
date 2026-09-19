@@ -57,6 +57,12 @@ final class PetViewModel {
         }
     }
 
+    /// Adopt a pet state returned by an action, without the loading flash of a full reload.
+    func apply(_ state: PetState) {
+        petState = state
+        loadState = .success
+    }
+
     func dismissReaction() {
         reactionMessage = nil
     }
