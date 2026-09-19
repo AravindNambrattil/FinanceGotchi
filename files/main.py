@@ -1,4 +1,4 @@
-"""FinanceGotchi API. Put this next to db.py and schema.sql.
+"""FinanceGotchi API. Put this next to db.py, nessie.py and schema.sql.
 
 Run:  python -m uvicorn main:app --reload
 Docs: http://127.0.0.1:8000/docs
@@ -11,11 +11,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 import db
+import nessie
+import todos
 
 DB_FILE = str(Path(__file__).with_name("financegotchi.db"))
 
 app = FastAPI(title="FinanceGotchi API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+app.include_router(todos.router)
 
 
 @app.on_event("startup")
@@ -38,6 +41,18 @@ def require_pet(conn, pet_id):
     if not pet:
         raise HTTPException(404, f"Pet '{pet_id}' not found")
     return pet
+
+
+def bank_snapshot(conn, pet_id):
+    """Live Nessie balances, or a note explaining why we're running locally."""
+    if not nessie.enabled():
+        return {"synced": False, "reason": "No NESSIE_API_KEY set"}
+    if not nessie.pet_accounts(conn, pet_id):
+        return {"synced": False, "reason": "Run setup_nessie.py first"}
+    try:
+        return {"synced": True, **nessie.balances(conn, pet_id)}
+    except nessie.NessieError as e:
+        return {"synced": False, "reason": str(e)}
 
 
 # ---------- Request bodies ----------
@@ -69,15 +84,20 @@ def read_pet(pet_id: str, conn=Depends(get_db)):
 @app.get("/pets/{pet_id}/finance")
 def read_finance(pet_id: str, conn=Depends(get_db)):
     pet = require_pet(conn, pet_id)
-    emergency = conn.execute(
-        "SELECT current, target FROM goals WHERE pet_id=? AND kind='emergency'", (pet_id,)
-    ).fetchone()
+    bank = bank_snapshot(conn, pet_id)
+    if bank["synced"]:  # emergency fund = real Nessie savings balance
+        emergency = {"current": bank["savings"], "target": nessie.emergency_target()}
+    else:
+        row = conn.execute("SELECT current, target FROM goals WHERE pet_id=? AND kind='emergency'",
+                           (pet_id,)).fetchone()
+        emergency = {"current": row["current"], "target": row["target"]} if row else None
     return {
         "goal": pet["goal"],
         "streak": pet["streak"],
         "savingsScore": pet["savingsScore"],
-        "emergencyFund": {"current": emergency["current"], "target": emergency["target"]} if emergency else None,
-        "recentActivity": db.get_activity(conn, pet_id),  # TODO: replace with Nessie data
+        "emergencyFund": emergency,
+        "bank": bank,
+        "recentActivity": db.get_activity(conn, pet_id),
     }
 
 
@@ -102,26 +122,73 @@ def read_history(pet_id: str, conn=Depends(get_db)):
 def post_decision(pet_id: str, body: DecisionIn, conn=Depends(get_db)):
     require_pet(conn, pet_id)
     amount = body.amount
-    if body.offerId:
+    offer_id = body.offerId or None  # Swagger's default 0 means "no offer"
+    offer = None
+    if offer_id:
         offer = conn.execute("SELECT * FROM offers WHERE id=? AND pet_id=?",
-                             (body.offerId, pet_id)).fetchone()
+                             (offer_id, pet_id)).fetchone()
         if not offer:
             raise HTTPException(404, "Offer not found")
         if amount == 0:
             amount = offer["cost"]
-    # TODO: call Nessie here (deposit for 'save', purchase for 'buy') BEFORE updating the pet
-    return db.apply_decision(conn, pet_id, body.choice, amount, body.offerId)
+
+    # 1) Move the money in Nessie first (skipped safely if Nessie isn't available)
+    bank = bank_snapshot(conn, pet_id)
+    if body.choice in ("save", "buy") and amount > 0:
+        desc = "Saved toward goal" if body.choice == "save" else (offer["title"] if offer else "Purchase")
+        nessie_id = None
+        if bank["synced"]:
+            acc = nessie.pet_accounts(conn, pet_id)
+            try:
+                if body.choice == "save":
+                    nessie_id = nessie.transfer(acc["checking"], acc["savings"], amount, desc)
+                    nessie.ledger_add(conn, pet_id, "checking", -amount, nessie_id, desc)
+                    nessie.ledger_add(conn, pet_id, "savings", amount, nessie_id, desc)
+                else:
+                    nessie_id = nessie.withdraw(acc["checking"], amount, desc)
+                    nessie.ledger_add(conn, pet_id, "checking", -amount, nessie_id, desc)
+                bank = bank_snapshot(conn, pet_id)  # fresh balances after the move
+            except nessie.NessieError as e:
+                bank = {"synced": False, "reason": str(e)}
+        if body.choice == "save":
+            nessie.log_tx(conn, pet_id, "savings", amount, desc, nessie_id)
+        else:
+            nessie.log_tx(conn, pet_id, offer["category"] if offer else "purchase",
+                          -amount, desc, nessie_id)
+
+    # 2) Then update the pet
+    result = db.apply_decision(conn, pet_id, body.choice, amount, offer_id)
+    result["bank"] = bank
+    return result
 
 
 @app.post("/pets/{pet_id}/expense")
 def post_expense(pet_id: str, body: ExpenseIn, conn=Depends(get_db)):
     """Trigger an unexpected expense (great for the demo)."""
     require_pet(conn, pet_id)
-    emergency = conn.execute(
-        "SELECT current FROM goals WHERE pet_id=? AND kind='emergency'", (pet_id,)
-    ).fetchone()
-    balance = emergency["current"] if emergency else 0  # TODO: use Nessie savings balance
-    return db.apply_unexpected_expense(conn, pet_id, body.title, body.amount, balance)
+    bank = bank_snapshot(conn, pet_id)
+    if bank["synced"]:
+        emergency_balance = bank["savings"]
+    else:
+        row = conn.execute("SELECT current FROM goals WHERE pet_id=? AND kind='emergency'",
+                           (pet_id,)).fetchone()
+        emergency_balance = row["current"] if row else 0
+
+    result = db.apply_unexpected_expense(conn, pet_id, body.title, body.amount, emergency_balance)
+
+    nessie_id = None
+    if bank["synced"]:
+        acc = nessie.pet_accounts(conn, pet_id)
+        source_key = "savings" if result["covered"] else "checking"
+        try:
+            nessie_id = nessie.withdraw(acc[source_key], body.amount, body.title)
+            nessie.ledger_add(conn, pet_id, source_key, -body.amount, nessie_id, body.title)
+            bank = bank_snapshot(conn, pet_id)
+        except nessie.NessieError as e:
+            bank = {"synced": False, "reason": str(e)}
+    nessie.log_tx(conn, pet_id, "unexpected", -body.amount, body.title, nessie_id)
+    result["bank"] = bank
+    return result
 
 
 @app.post("/pets/{pet_id}/interact")

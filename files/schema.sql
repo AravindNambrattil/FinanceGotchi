@@ -1,5 +1,6 @@
 PRAGMA foreign_keys = ON;
 
+-- One row per physical/virtual pet
 CREATE TABLE IF NOT EXISTS pets (
     id             TEXT PRIMARY KEY,               -- 'mochi'
     name           TEXT NOT NULL,
@@ -18,6 +19,7 @@ CREATE TABLE IF NOT EXISTS pets (
     created_at     TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Long-term goals (one 'custom' + one 'emergency' per pet)
 CREATE TABLE IF NOT EXISTS goals (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     pet_id     TEXT NOT NULL REFERENCES pets(id),
@@ -29,6 +31,7 @@ CREATE TABLE IF NOT EXISTS goals (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- "Mochi wants new headphones" prompts shown on the phone
 CREATE TABLE IF NOT EXISTS offers (
     id        INTEGER PRIMARY KEY AUTOINCREMENT,
     pet_id    TEXT NOT NULL REFERENCES pets(id),
@@ -39,6 +42,7 @@ CREATE TABLE IF NOT EXISTS offers (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Every user choice + the effect it had (powers History screen)
 CREATE TABLE IF NOT EXISTS decisions (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     pet_id      TEXT NOT NULL REFERENCES pets(id),
@@ -52,6 +56,7 @@ CREATE TABLE IF NOT EXISTS decisions (
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Unexpected expenses (bike repair etc.)
 CREATE TABLE IF NOT EXISTS events (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     pet_id      TEXT NOT NULL REFERENCES pets(id),
@@ -61,12 +66,25 @@ CREATE TABLE IF NOT EXISTS events (
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Local mirror of Nessie activity (Recent activity list + offline demo fallback)
 CREATE TABLE IF NOT EXISTS transactions (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     pet_id      TEXT NOT NULL REFERENCES pets(id),
     nessie_id   TEXT,                              -- id returned by Nessie
     category    TEXT NOT NULL,                     -- groceries, dining, savings...
     amount      REAL NOT NULL,                     -- negative = spent, positive = saved/deposit
+    description TEXT,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Money we've actually posted to Nessie. Nessie's sandbox records transactions but never
+-- updates account balances, so balance = Nessie's starting balance + the sum of this table.
+CREATE TABLE IF NOT EXISTS ledger (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    pet_id      TEXT NOT NULL REFERENCES pets(id),
+    account     TEXT NOT NULL CHECK (account IN ('checking','savings')),
+    amount      REAL NOT NULL,                     -- negative = money out, positive = money in
+    nessie_id   TEXT,
     description TEXT,
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
