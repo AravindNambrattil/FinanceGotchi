@@ -1,0 +1,62 @@
+import SwiftUI
+
+struct ReactionOverlay: View {
+    let message: String
+    let onDismiss: () -> Void
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Text("🎉")
+                .font(.system(size: 48))
+
+            Text(message)
+                .font(.headline)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 24)
+
+            Button(action: onDismiss) {
+                Text("Got it!")
+                    .font(.subheadline.bold())
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(Color.accentColor)
+                    .foregroundStyle(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+            .padding(.horizontal, 32)
+        }
+        .padding(32)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24))
+        .padding(.horizontal, 24)
+        .shadow(radius: 20)
+        .transition(.scale.combined(with: .opacity))
+    }
+}
+
+/// Wraps a view and overlays a reaction message when `message` is non-nil.
+struct ReactionOverlayModifier: ViewModifier {
+    let message: String?
+    let onDismiss: () -> Void
+
+    func body(content: Content) -> some View {
+        ZStack {
+            content
+                .blur(radius: message != nil ? 2 : 0)
+                .animation(.easeInOut(duration: 0.2), value: message != nil)
+
+            if let message {
+                Color.black.opacity(0.3)
+                    .ignoresSafeArea()
+                    .transition(.opacity)
+                ReactionOverlay(message: message, onDismiss: onDismiss)
+            }
+        }
+        .animation(.spring(response: 0.4, dampingFraction: 0.75), value: message != nil)
+    }
+}
+
+extension View {
+    func reactionOverlay(message: String?, onDismiss: @escaping () -> Void) -> some View {
+        modifier(ReactionOverlayModifier(message: message, onDismiss: onDismiss))
+    }
+}
