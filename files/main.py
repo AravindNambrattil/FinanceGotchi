@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 import db
 import nessie
+import device
 import todos
 
 DB_FILE = str(Path(__file__).with_name("financegotchi.db"))
@@ -19,6 +20,7 @@ DB_FILE = str(Path(__file__).with_name("financegotchi.db"))
 app = FastAPI(title="FinanceGotchi API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 app.include_router(todos.router)
+app.include_router(device.router)
 
 
 @app.on_event("startup")

@@ -1,0 +1,19 @@
+[Unit]
+Description=FinanceGotchi API
+After=network.target
+
+[Service]
+User=financegotchi
+Group=financegotchi
+WorkingDirectory=/opt/financegotchi/app
+# One worker on purpose: SQLite allows a single writer at a time.
+ExecStart=/opt/financegotchi/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000 --workers 1
+Restart=always
+RestartSec=3
+# The API only needs to write its own folder.
+NoNewPrivileges=true
+ProtectSystem=full
+ReadWritePaths=/opt/financegotchi
+
+[Install]
+WantedBy=multi-user.target
