@@ -40,10 +40,12 @@ struct HealthActivityCard: View {
     private var metricsRow: some View {
         HStack(spacing: 0) {
             metricCell(value: "\(viewModel.steps)", unit: "steps", icon: "shoeprints.fill")
-            Rectangle().fill(Theme.separator).frame(width: 1, height: 44)
-            metricCell(value: "\(Int(viewModel.activeEnergyKcal))", unit: "kcal", icon: "flame.fill")
-            Rectangle().fill(Theme.separator).frame(width: 1, height: 44)
-            metricCell(value: "\(viewModel.exerciseMinutes)", unit: "min", icon: "bolt.heart.fill")
+            if viewModel.hasEnergyAndExercise {
+                Rectangle().fill(Theme.separator).frame(width: 1, height: 44)
+                metricCell(value: "\(Int(viewModel.activeEnergyKcal))", unit: "kcal", icon: "flame.fill")
+                Rectangle().fill(Theme.separator).frame(width: 1, height: 44)
+                metricCell(value: "\(viewModel.exerciseMinutes)", unit: "min", icon: "bolt.heart.fill")
+            }
         }
         .padding(.vertical, 4)
     }
@@ -89,8 +91,8 @@ struct HealthActivityCard: View {
             Task { await viewModel.requestAuthorization() }
         } label: {
             HStack(spacing: 8) {
-                Image(systemName: "heart.text.square.fill")
-                Text("Connect Apple Health")
+                Image(systemName: viewModel.hasEnergyAndExercise ? "heart.text.square.fill" : "figure.walk")
+                Text(viewModel.hasEnergyAndExercise ? "Connect Apple Health" : "Count my steps")
             }
             .frame(maxWidth: .infinity)
         }

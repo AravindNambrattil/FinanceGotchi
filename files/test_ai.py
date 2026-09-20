@@ -311,6 +311,29 @@ class ChatTests(unittest.TestCase):
         self.assertIsNotNone(self.ask("How active was I?", raw="You have taken 4200 steps today.", facts=facts)[0]["text"])
         self.assertIsNone(self.ask("How active was I lately?", raw="You have taken 9000 steps today.", facts=facts)[0]["text"])
 
+    def test_facts_follow_the_topic_of_the_question(self):
+        facts = {"pet": "Mochi", "mood": "happy", "streak_days": 5, "goal": "Laptop", "goal_pct": 72,
+                 "goal_remaining_usd": 280, "steps_count": 3200, "energy_pct": 75, "summary": "money summary"}
+        money = ai.facts_for_question("How can I save a bit more?", facts)
+        self.assertNotIn("steps_count", money)
+        self.assertIn("goal_remaining_usd", money)
+        health = ai.facts_for_question("How do I sleep better?", facts)
+        self.assertIn("steps_count", health)
+        self.assertNotIn("goal_remaining_usd", health)
+        self.assertNotIn("summary", health)
+        self.assertEqual(set(ai.facts_for_question("Give me a tip for today", facts)), {"pet", "mood", "streak_days", "goal", "goal_pct"})
+        self.assertEqual(ai.facts_for_question("Does saving help my stress?", facts), facts)
+
+    def test_small_round_numbers_are_allowed_in_suggestions_only(self):
+        ok = ["Try setting aside $10 a week toward your Laptop.", "Why not try a 10 minute walk after lunch?",
+              "Aim for 7-9 hours of sleep, it helps your energy."]
+        for i, raw in enumerate(ok):
+            self.assertIsNotNone(self.ask(f"tip {i}", raw=raw)[0]["text"], raw)
+        bad = ["You have $10 saved.", "Try adding $720 more.", "Try to reach 90% soon.", "You walked 30 minutes today.",
+               "Try saving $12 a week."]
+        for i, raw in enumerate(bad):
+            self.assertIsNone(self.ask(f"bad {i}", raw=raw)[0]["text"], raw)
+
     def test_crisis_and_medical_questions_get_a_fixed_reply(self):
         crisis, seen = self.ask("i want to kill myself")
         self.assertEqual(crisis["reason"], "crisis")

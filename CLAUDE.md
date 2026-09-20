@@ -288,6 +288,218 @@ Everything for it lives in `pi/`; `pi/README.md` is the handoff for whoever wire
   - It returns several events instead of one so two things in the same second can't hide each other.
 - **Pi side:** `pi/financegotchi_pi.py` (network + logic, tested) and `pi/hardware.py`. `ConsoleHardware` runs anywhere;
   `GroveHardware` is the part the hardware teammate writes. Tests: `python3 -m unittest -v pi/test_pi.py` from `pi/`.
+- **Activity data (app):** the project is signed with a **free personal team**, which cannot use HealthKit (Xcode errors:
+  "Personal development teams ... HealthKit"). So `HealthKitManager` falls back to CoreMotion's pedometer (steps only,
+  `NSMotionUsageDescription`, no entitlement). To get kcal + exercise minutes, a paid account is needed: add
+  `INFOPLIST_KEY_NSHealthShareUsageDescription` and `CODE_SIGN_ENTITLEMENTS = Healthbuddy.entitlements` (the file holds only
+  `com.apple.developer.healthkit`; do NOT add `healthkit.access`, it needs Apple approval). `canUseHealthKit` keys off the plist
+  key on purpose: calling HealthKit without the entitlement throws an uncatchable NSException. The simulator has no pedometer.
+- **Tab bar:** the system tab bar is hidden per tab (`.toolbarVisibility(.hidden, for: .tabBar)` on each tab's
+  content — on the `TabView` itself it does nothing) and `FloatingTabBar` is inserted with `safeAreaInset`.
+- **Type:** the template uses Poppins; we use SF Rounded via `Theme` fonts (Dynamic Type friendly). Swapping in
+  Poppins would be a change to `Theme` only.
+- **No emoji in the UI.** On the iOS 26 simulator they render as `?` boxes, and they don't tint or scale like SF
+  Symbols. Use SF Symbols, or `MochiView` for the pet's face.
+- Redesign visuals only — layout, styling, and component structure. Don't change view-model logic, service
+  contracts, or the model JSON shape as part of a restyle.
+- Keep the playful pet-companion personality; the template supplies the visual language, not the product concept.
+- Support Dynamic Type and light/dark mode; use SF Symbols where the template uses generic icons.
+- Check the result on a simulator (small + large iPhone) before calling a screen done.
+
+## Goal tracker
+
+Users keep several savings goals, each with a contribution log. One goal is **primary**: it is the one Mochi
+reacts to, the Pet tab tile shows, and "Save It" targets by default.
+
+- **Invariant:** a goal's `current` only moves through `GoalStoreProtocol.addContribution`, and always equals
+  the sum of its contribution log. There is no way to set a balance directly.
+- **Single writer:** a "Save It" decision is credited in exactly one place, `MockPetService.sendAction` (later the
+  backend's `/decision`). `FinancialViewModel` must never add a contribution itself, or the amount is counted twice.
+- **`GoalStoreProtocol`** is the seam with the backend. `LocalGoalStore` persists JSON in Application Support
+  (in-memory for previews) and holds the goals until the endpoints below ship; then `RemoteGoalStore` (already
+  written against this contract) takes over. Its stored bytes match the API shape, so the models don't change.
+- `SavingsGoal` (the pet JSON's `goal{name,current,target}`) is unchanged. `Goal` is the richer local type and
+  bridges to it with `asSavingsGoal`. Both decode an `id` that is a string, a number, or missing.
+- Only arithmetic lives in the app (percent, remaining, $/week). Completion, streaks, and the pet's mood/score
+  reaction are policy and belong to the backend; the local stand-ins are marked `BACKEND OWNS THIS`.
+- The emergency fund is a goal of `kind: emergency`. It is filtered out of the goals list because the Emergency
+  Fund card already shows it.
+
+### Backend contract for goals (for the backend teammate)
+
+Same style as the existing API: no `/api` prefix, `/pets/{pet_id}/...`, camelCase JSON, `id` may be an int.
+
+| Method | Path | Body -> Returns |
+| --- | --- | --- |
+| GET | `/pets/{id}/goals` | -> `{goals:[{id,kind,name,symbol,current,target,deadline,status,createdAt,milestone}], primaryGoalId}` |
+| POST | `/pets/{id}/goals` | `{name,symbol,target,deadline?,kind?}` -> `201` goal |
+| PUT | `/pets/{id}/goals/{gid}` | same fields; **reject any `current` with 400** -> goal |
+| DELETE | `/pets/{id}/goals/{gid}?hard=false` | -> snapshot. Soft sets `archived_at`; `409` if `hard` and real contributions exist |
+| POST | `/pets/{id}/goals/{gid}/primary` | -> snapshot |
+| GET | `/pets/{id}/goals/{gid}/contributions` | -> `[{id,goalId,amount,date,source,note}]` |
+| POST | `/pets/{id}/goals/{gid}/contributions` | `{amount,source?,note?,date?}` -> `{contribution,goal,milestoneCrossed,pet,message}` |
+| POST | `/pets/{id}/decision` | add `goalId?`; credit **that** goal (fallback: primary); return `contribution` + `goal` |
+
+`source` is one of `manual | saved_instead | round_up | seed | correction`. `milestone` is 0-4 for the bands
+0-25 / 25-50 / 50-75 / 75-99 / 100 %. `deadline` is `YYYY-MM-DD`; timestamps may be ISO-8601 or SQLite
+`YYYY-MM-DD HH:MM:SS` (`JSONCoding` accepts both). The server owns incrementing `current`, marking a goal `done`,
+and the streak / `savings_score` bumps.
+
+Migration notes:
+- SQLite cannot alter a `CHECK`, so use an `archived_at` column instead of a new `status` value.
+- `db.init_db` re-runs `schema.sql` on every startup, so bare `ALTER TABLE` lines there fail on the second launch.
+  Guard them with `PRAGMA table_info` or put them in `setup_db.py`.
+- New columns: `goals.symbol`, `goals.deadline`, `goals.archived_at`, `goals.is_primary` (plus a partial unique index
+  so a pet has one primary), a `contributions` table, and `decisions.goal_id`. `db.get_pet` should
+  `ORDER BY is_primary DESC, id DESC` and return the goal's `id`.
+
+Known issues to fix on the backend side:
+1. **Path mismatch.** The app calls `/api/pets/{id}/state|transactions|actions`; the backend serves `/pets/{id}`,
+   `/pets/{id}/finance`, `/pets/{id}/decision`. One side has to move before `useMockData` can be turned off.
+2. **Every goal is credited.** `db.apply_decision` updates *all* active custom goals (no goal id), so with two goals
+   one save credits both.
+3. **`db.get_pet` omits the goal `id`.** The app tolerates this, but return it.
+
+## Intro and sign-in
+
+First launch shows a landing page, then three swipeable onboarding pages, then sign-in. `SessionStore` keeps
+`hasOnboarded`, `isSignedIn`, `email`, and `displayName` in `UserDefaults`. The Goals tab has "Replay intro" and
+"Sign out" for re-running the demo.
+
+Sign-in is **demo-only**: any well-formed email and a password of 6+ characters get in. There is no auth backend.
+The login screen says so, and the password is validated in local state and discarded, never stored or sent. Do
+not persist it, and don't make this screen look like it secures anything, until real auth exists.
+
+## Mochi
+
+`MochiView` is drawn from SwiftUI shapes, so there is no art to license and nothing that renders as a `?` box.
+`mood` changes the face; `milestone` adds decorations cumulatively (leaf 25 %, scarf 50 %, sparkles 75 %, party
+hat 100 %). Idle animation stops under Reduce Motion. The app icon is the same face, drawn by a small PIL script.
+The Figma file's own people-illustrations are third-party art and are not used.
+
+## Deployment (Vultr)
+
+The backend runs on one Vultr VM (4 vCPU / 12 GB, Ubuntu 24.04). Vultr credit expires 2026-10-20.
+
+- **URL:** `https://66-42-93-22.sslip.io` (server IP `66.42.93.22`). Interactive docs at `/docs`.
+- **Login:** `ssh root@66.42.93.22` with the SSH key in `~/.ssh/id_ed25519` (public half added in Vultr).
+- **Do not recreate the VM.** The hostname is derived from the IP and its HTTPS certificate is tied to it; a new
+  server means a new IP, a new cert, and shared free hostnames can hit rate limits.
+- **Destroy the VM after the hackathon** in the Vultr dashboard. A stopped server is still billed, and after
+  the credit expires it is $72/mo.
+
+How it fits together: `iOS app -> HTTPS -> Caddy (80/443, auto certificate) -> uvicorn (127.0.0.1:8000) -> SQLite file`,
+and uvicorn calls Nessie over HTTPS. The database is a file, so there is no connection string and no DB server.
+
+| Thing | Where |
+| --- | --- |
+| Code | `/opt/financegotchi/app/` (a copy of `files/`, not a git checkout) |
+| Python env | `/opt/financegotchi/venv/` |
+| Database | `/opt/financegotchi/app/financegotchi.db` (**the only copy**) |
+| Secrets | `/opt/financegotchi/app/.env` (mode 600, owned by `financegotchi`) |
+| Backups | `/opt/financegotchi/backups/` (nightly 03:00, 14 days, same disk) |
+| Service | `systemd` unit `financegotchi`, runs as the `financegotchi` user, **one worker on purpose** (SQLite has one writer) |
+| Firewall | server `ufw` allows only 22, 80, 443 (Vultr's own firewall group is not used) |
+| AI model | Ollama (`ollama` service) with `qwen2.5:3b`, bound to `127.0.0.1:11434` only; see "AI-written text" |
+
+Everyday commands:
+
+```bash
+deploy/deploy.sh 66.42.93.22                      # push files/ + deploy/ and re-run setup (safe to repeat)
+ssh root@66.42.93.22 'systemctl status financegotchi --no-pager'
+ssh root@66.42.93.22 'journalctl -u financegotchi -f'     # live logs
+ssh root@66.42.93.22 'systemctl restart financegotchi'
+curl https://66-42-93-22.sslip.io/pets/mochi      # quick health check
+```
+
+`deploy/deploy.sh` never overwrites the server's `financegotchi.db` or `.env`; it excludes them. Backend changes go
+live only when you run it. The deploy files are `deploy/` (`deploy.sh`, `remote-setup.sh`, `financegotchi.service`,
+`Caddyfile.template`), `files/requirements.txt`, and `files/.env.example`.
+
+### Secrets
+
+The Nessie key lives only in the server's `.env`. It was typed through a hidden prompt, never committed and never
+pasted into chat. To set or change it, run this in **your own Terminal** (macOS uses zsh, so the prompt syntax is
+`"K?..."`, not bash's `-p`):
+
+```bash
+read -rs "K?Nessie key: " && echo && [ -n "$K" ] && ssh root@66.42.93.22 "umask 077; printf 'NESSIE_API_KEY=%s\n' '$K' > /opt/financegotchi/app/.env && chown financegotchi:financegotchi /opt/financegotchi/app/.env && systemctl restart financegotchi"; unset K
+```
+
+Lessons from setting this up: `!` commands in Claude Code can't answer prompts, so anything interactive must run in a real
+Terminal; and chain steps with `&&`, not `;`, so a failed step can't let a later one run with an empty variable.
+
+### Nessie
+
+Linked on the server with `setup_nessie.py`, run as the service user:
+`ssh root@66.42.93.22 'cd /opt/financegotchi/app && runuser -u financegotchi -- /opt/financegotchi/venv/bin/python setup_nessie.py'`.
+It found the Nessie customer "Mochi Owner"; Checking is $420 and Savings is $110. `GET /pets/mochi/finance` reports
+`bank.synced: true` and the emergency fund comes from the Nessie savings account. If `.env` is missing or wrong the API
+still works but returns `bank.synced: false` with a reason.
+
+**Writes are not tested on the live server.** A `/decision` or `/expense` moves real Nessie balances and, for the
+seeded "New headphones" offer, resolves it. There is only one offer and no endpoint to create another, so testing a
+decision uses up the demo offer. To rerun the demo from scratch: stop the service, delete `financegotchi.db`, start it
+(it reseeds), and rerun `setup_nessie.py`. That does not reset Nessie's own balances.
+
+### Backend API as deployed
+
+`GET /pets/{id}` -> `{id,name,mood,needs,energy,savingsScore,streak,connected,goal{name,current,target}}` (mood is a number).
+`GET /pets/{id}/finance` -> `{goal,streak,savingsScore,emergencyFund{current,target},bank{synced,checking,savings},recentActivity[]}`;
+activity rows are snake_case (`created_at`, `pet_id`, ...). `GET /pets/{id}/offer`, `GET /pets/{id}/history`,
+`POST /pets/{id}/decision` (`{choice: buy|save|later, amount, offerId?}`), `POST /pets/{id}/expense`,
+`POST /pets/{id}/interact`, `POST /pets/{id}/movement`, and the new `GET/POST /pets/{id}/todos` (`todos.py`).
+The API has **no authentication** and CORS allows every origin; anyone with the URL can change Mochi's data.
+
+### App <-> server: connected
+
+The app talks to the deployed server by default. `Services/PetService.swift` is the only place that knows the server's
+shapes; `Services/ServerModels.swift` holds them (`BackendPet`, `BackendFinance`, ...). Views never see them.
+
+| App call | Server |
+| --- | --- |
+| `fetchPetState` | `GET /pets/{id}` + `GET /pets/{id}/finance`, merged into `PetState` |
+| `fetchTransactions` | `GET /pets/{id}/finance` -> `recentActivity` |
+| `fetchOffer` | `GET /pets/{id}/offer` (nil when nothing is pending) |
+| `sendAction` | `POST /pets/{id}/decision` with `{choice, amount, offerId}`; app `buy/save_instead/defer` -> server `buy/save/later` |
+| `sendInteraction` | `POST /pets/{id}/interact` (`hang_out` -> `play`) |
+| `sendHealth` | **no server endpoint**; returns a local message and sends nothing |
+
+Translation done in the app, display only: numeric mood -> face (85+ excited, 60+ happy, 40+ neutral, else sad), and the
+pet's one-line message (the server has none). Balance and emergency fund come from Nessie via `/finance`.
+
+`AdaptivePetService` chooses demo or live on every call, so flipping the switch needs no restart; `MainTabView`
+reloads everything when it flips. The pill on the Pet tab says LIVE or DEMO. Demo mode is a stateful `MockPetService`
+whose wants cycle (headphones, concert tickets, jacket, takeout), so it can be demoed repeatedly.
+
+Live-mode facts to remember:
+- **The decision card is driven by the server's pending offer.** Deciding resolves it, and the server has one seeded
+  offer and no endpoint to create more, so live mode allows **one decision** until someone adds an offer (reseed to reset,
+  see Nessie section). Then the card shows "Mochi is happy for now".
+- **Goals are still stored on the device**, even in live mode, because the server has one goal and no goal endpoints
+  (`AppSettings.useServerGoals` is the switch for when they exist). After the server accepts a save, `PetService.sendAction`
+  credits the chosen goal locally (the single writer). The server separately credits its own one goal, so the server's
+  goal number and the app's can drift apart; the app shows its own.
+- The companion pet "Byte" does not exist on the server (404), so that card simply hides in live mode.
+- Apple Health activity is not sent anywhere in live mode.
+- **Only reads have been run against the live server.** The decision and interact writes are covered by code, not by a test
+  against the real server.
+
+## Physical pet (Raspberry Pi 4B)
+
+The pet on the desk is a Raspberry Pi 4B with an RGB LCD (16x2), several motion sensors, a buzzer and buttons. It
+connects over Wi-Fi (the team's phone hotspot) to the server. **No Bluetooth, no ESP32, no direct phone link.**
+Everything for it lives in `pi/`; `pi/README.md` is the handoff for whoever wires the hardware.
+
+- **Server side:** `files/device.py`, hooked into `main.py` with two lines.
+  - `GET /pets/{id}/device/state?device=pi` -> `{pet, events[], device}`. `events` is the newest 5 decisions and unexpected
+    expenses, newest first, each with a unique `key`, a `reaction` (`celebrate|happy|wait|relief|sad`) and an LCD-sized
+    `short` caption. Passing `?device=` counts as a heartbeat; without it the call has no side effects.
+  - `GET /pets/{id}/device` -> `{connected, lastSync, secondsAgo}`. Online means a heartbeat within the last 20 s.
+    Use this, not the `connected` field in the pet JSON (that column is set once and never expires).
+  - It returns several events instead of one so two things in the same second can't hide each other.
+- **Pi side:** `pi/financegotchi_pi.py` (network + logic, tested) and `pi/hardware.py`. `ConsoleHardware` runs anywhere;
+  `GroveHardware` is the part the hardware teammate writes. Tests: `python3 -m unittest -v pi/test_pi.py` from `pi/`.
 - **Apple Health (app):** needs `INFOPLIST_KEY_NSHealthShareUsageDescription` and `Healthbuddy.entitlements` (HealthKit) in the
   project; without them `HealthKitManager.canUseHealthKit` is false and the Connect button silently does nothing.
 - **Tab bar:** `FloatingTabBar` sits in a `VStack` under the `TabView`. `safeAreaInset` on the `TabView` does not inset tab content on iOS 26, which hid the bottom-most buttons.
@@ -307,10 +519,20 @@ Everything for it lives in `pi/`; `pi/README.md` is the handoff for whoever wire
 ## AI-written text
 
 A fourth surface, **Chat with Mochi** (Pet tab card -> sheet, `Views/Chat/ChatView.swift`, `ChatViewModel`), was added at the
-user's request even though free-form chat was avoided at first. It is fenced in: `POST /pets/{id}/ai/chat`
-`{message, facts, history}` answers only from facts the app sends, runs the same number/tone/no-advice/emoji checks, and
-questions about investing, crypto, tax, loans, insurance or gambling get a fixed reply without reaching the model. On
-failure the app shows a built-in fallback line. Live-tested: 2-5 s per answer.
+user's request as a broader wellbeing coach (money habits, activity, sleep, stress, routines), not just finance.
+`POST /pets/{id}/ai/chat` `{message, facts, history}`; the app sends its finished numbers, including Apple Health steps,
+active energy and exercise minutes when connected (they go to our own server only and are not stored).
+- **Fenced in:** never judges spending; no diagnosis, medicine, diets, investing, tax or legal advice. `CHAT_SHORTCUTS` in
+  `ai.py` answers crisis (988), finance-advice and medical questions with fixed text without calling the model.
+- **Numbers:** still checked against the facts, except small round numbers inside *suggestion* sentences ("try $10 a week",
+  "a 10 minute walk") which are allowed (`without_suggestion_numbers`); this loosening is chat-only. Praise is allowed.
+- **Facts follow the topic** (`facts_for_question`): money questions get money facts, health questions health facts. Mixing
+  them made the 3B model cross them ("use your 140 active kcal to save").
+- **Speed:** the VM's CPU reads only ~40 prompt tokens/s (generation ~20 tok/s), and the model is already Q4_K_M, so
+  quantizing more does not help. Time goes on prompt length and cache misses. So the chat system prompt is short, facts sit
+  in the system message sorted and compact so Ollama reuses its cached prefix, chat is capped at 2 attempts, `AI_THREADS`
+  defaults to 4, and warm-up loads the chat prompt. Typical answer 2-6 s; the first after a restart is slower.
+- Falls back to a built-in line when the answer fails the checks.
 
 Three places show a sentence written by an AI, always labelled "AI-written", and always *in addition to* built-in text
 (nothing on screen depends on the AI):

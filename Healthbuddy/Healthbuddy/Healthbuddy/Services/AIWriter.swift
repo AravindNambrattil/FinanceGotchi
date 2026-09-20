@@ -161,7 +161,7 @@ extension Array where Element == Transaction {
 extension PetState {
     /// Facts for chat. Only finished numbers from what the app is already showing; the model does no maths.
     /// `goal` is the primary goal (falls back to the pet's own goal); `transactions` is whatever activity is loaded.
-    func aiChatFacts(goal: Goal?, transactions: [Transaction], health: HealthPayload? = nil) -> [String: AIFact] {
+    func aiChatFacts(goal: Goal?, transactions: [Transaction], health: HealthPayload? = nil, healthHasEnergyAndExercise: Bool = true) -> [String: AIFact] {
         var facts: [String: AIFact] = [
             "pet": .text(name),
             "mood": .text(moodExpression.rawValue),
@@ -202,10 +202,11 @@ extension PetState {
         }
         if let health {
             facts["steps_count"] = .number(Double(health.steps))
-            facts["active_energy_kcal_count"] = .number(health.activeEnergyKcal.rounded())
-            facts["exercise_minutes_count"] = .number(Double(health.exerciseMinutes))
+            if healthHasEnergyAndExercise {
+                facts["active_energy_kcal_count"] = .number(health.activeEnergyKcal.rounded())
+                facts["exercise_minutes_count"] = .number(Double(health.exerciseMinutes))
+            }
             facts["energy_pct"] = .number(energy.rounded())
-            summary += "; \(health.steps) steps today"
         }
         facts["summary"] = .text(summary + ".")
         return facts

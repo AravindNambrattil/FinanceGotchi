@@ -104,7 +104,8 @@ CHAT_SYSTEM = (
     "You are not a doctor, therapist or financial adviser: no diagnoses, medicine, diets or weight targets, and no "
     "investing, tax or legal advice; for anything serious, suggest talking to a professional or someone they trust. "
     "Use a number only if it appears in the facts below, exactly as given; never invent numbers about the person and "
-    "keep general tips free of specific numbers (say a short walk, not 10 minutes). Do not say anything about the "
+    "keep general tips free of numbers: never name a dollar amount, percentage or length of time that is not in the facts "
+    "(say a small amount each week, a short walk, a regular bedtime). Do not say anything about the "
     "person that the facts do not say. If asked about something unrelated (like coding or homework), kindly say that is "
     "outside what you can help with and steer back to their habits and goals. No emojis, no markdown."
 )
@@ -145,10 +146,55 @@ CHAT_SHORTCUTS = [
 CHAT_ANSWER_BANNED = re.compile(r"\b(invest\w*|stocks?|crypto\w*|bitcoin|etf|mortgage|diagnos\w*|prescri\w*|"
                                 r"medication|dosage|calorie|diet|good spending|bad spending|wasteful|irresponsible|"
                                 r"reckless|careless|guilt\w*|splurg\w*|overspend\w*|lazy|fully funded)\b", re.I)
+# Send the model only the facts a question is about. Mixing money and health facts made the 3B model cross them
+# ("save more" -> "use your 140 active kcal"), and every extra fact is prompt the CPU has to read.
+HEALTH_KEYS = {"steps_count", "active_energy_kcal_count", "exercise_minutes_count", "energy_pct"}
+BASIC_KEYS = {"pet", "mood", "streak_days", "goal", "goal_pct"}
+HEALTH_TOPIC = re.compile(r"\b(active|activity|steps?|walk\w*|run\w*|exercis\w*|workout\w*|energy|energetic|sleep\w*|tired|"
+                          r"stress\w*|anxi\w*|health\w*|mov(?:e|ing)|stretch\w*|calm|relax\w*|routine|focus\w*|exams?|"
+                          r"study\w*|mood|sluggish|rest|body|fit\w*)\b", re.I)
+MONEY_TOPIC = re.compile(r"\b(sav\w*|goals?|money|emergency|funds?|spen[dt]\w*|balance|budget\w*|streak|laptop|cash|afford|"
+                         r"buy\w*|bought|expens\w*|income|paycheck|dollars?|bank\w*|purchase\w*)\b|\$", re.I)
+
+
+def facts_for_question(question: str, facts: Dict[str, Any]) -> Dict[str, Any]:
+    health, money = bool(HEALTH_TOPIC.search(question)), bool(MONEY_TOPIC.search(question))
+    if health and money:
+        return facts
+    if health:
+        keep = BASIC_KEYS - {"goal", "goal_pct"} | HEALTH_KEYS
+    elif money:
+        keep = set(facts) - HEALTH_KEYS
+    else:
+        keep = BASIC_KEYS
+    return {k: v for k, v in facts.items() if k in keep and not (k == "summary" and health and not money)}
+
+
+# Numbers inside a *suggestion* ("try setting aside $10 a week", "a 10 minute walk") are not claims about the person, so
+# small round ones are allowed there. Everything else in a chat answer is still checked against the facts: a sentence
+# that states something about the person, a percentage, or any other amount is never let through.
+SUGGESTION = re.compile(r"\b(try|could|might|maybe|aim|how about|why not|consider|start with|even|set aside|put aside|"
+                        r"a good|can help|helps)\b", re.I)
+TIP_DOLLARS = re.compile(r"\$\s?(?:5|10|15|20|25|30|40|50)(?![\d.,]\d)")
+TIP_MINUTES = re.compile(r"\b(?:5|10|15|20|30)[- ]?(?:minutes?|mins?)\b", re.I)
+TIP_HOURS = re.compile(r"\b(?:[5-9]|1[0-2])(?:\s?(?:-|to)\s?(?:[5-9]|1[0-2]))?[- ]?hours?\b", re.I)
+
+
+def without_suggestion_numbers(text: str) -> str:
+    out = []
+    for sentence in re.split(r"(?<=[.!?])\s+", text):
+        if SUGGESTION.search(sentence):
+            for pattern in (TIP_DOLLARS, TIP_MINUTES, TIP_HOURS):
+                sentence = pattern.sub("some", sentence)
+        out.append(sentence)
+    return " ".join(out)
+
+
 EMOJI = re.compile("[\U0001F300-\U0001FAFF\u2600-\u27BF]")
 CHAT_HISTORY_TURNS = 6
 
 MAX_ATTEMPTS = 3
+CHAT_ATTEMPTS = 2  # a typed question is waited on, so a failure should come back fast
 CACHE_TTL_SECONDS = 600
 CACHE_MAX = 256
 _cache: "OrderedDict[str, tuple]" = OrderedDict()
@@ -418,6 +464,7 @@ def generate(kind: str, raw_facts: Dict[str, Any], _chat=None, question: Optiona
                 result.update(text=reply, lines=[reply])
                 return finish(reason)
         history = clean_history(history)
+        facts = facts_for_question(question, facts) or facts
 
     key = kind + "|" + json.dumps(facts, sort_keys=True) + (
         "|" + json.dumps([question, history]) if kind == "chat" else "")
@@ -436,7 +483,7 @@ def generate(kind: str, raw_facts: Dict[str, Any], _chat=None, question: Optiona
     try:
         problem = "no attempt"
         messages = build_messages(kind, facts, question, history)
-        for attempt in range(MAX_ATTEMPTS):
+        for attempt in range(CHAT_ATTEMPTS if kind == "chat" else MAX_ATTEMPTS):
             remaining = budget - (time.monotonic() - started)
             if remaining < 2.0:
                 problem = "timed out"
@@ -454,7 +501,8 @@ def generate(kind: str, raw_facts: Dict[str, Any], _chat=None, question: Optiona
                 text = "\n".join(lines)
                 problem = "no valid tips" if not lines else None
             else:
-                problem = answer_problem(text, facts, spec["max_words"]) or meaning_problem(text, facts, kind)
+                problem = (answer_problem(without_suggestion_numbers(text) if kind == "chat" else text, facts,
+                                          spec["max_words"]) or meaning_problem(text, facts, kind))
             if problem is None:
                 with _cache_lock:
                     _cache[key] = (time.time(), text, lines)
@@ -479,9 +527,10 @@ def warm_up(delay: float = 8.0) -> None:
     time.sleep(delay)
     if not enabled():
         return
-    sample = {"event": "save", "summary": "Saved $10 for the Laptop goal.", "amount_usd": 10, "goal": "Laptop"}
+    sample = {"pet": "Mochi", "mood": "happy", "streak_days": 3}
     try:
-        chat(build_messages("decision", sample), 10, 90.0)
+        # The chat prompt is the longest and most used, so it is the one worth having ready in the cache.
+        chat(build_messages("chat", sample, "hi", []), 10, 90.0)
     except ModelUnavailable:
         pass
 

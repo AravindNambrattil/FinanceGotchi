@@ -177,7 +177,8 @@ struct ChatView: View {
         let facts = pet.aiChatFacts(
             goal: goalsVM.primaryGoal,
             transactions: financialVM.transactions,
-            health: hasHealth ? HealthPayload(steps: healthVM.steps, activeEnergyKcal: healthVM.activeEnergyKcal, exerciseMinutes: healthVM.exerciseMinutes) : nil
+            health: hasHealth ? HealthPayload(steps: healthVM.steps, activeEnergyKcal: healthVM.activeEnergyKcal, exerciseMinutes: healthVM.exerciseMinutes) : nil,
+            healthHasEnergyAndExercise: healthVM.hasEnergyAndExercise
         )
         Task { await chatVM.send(text, facts: facts) }
     }

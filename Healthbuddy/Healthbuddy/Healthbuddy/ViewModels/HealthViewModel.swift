@@ -16,6 +16,8 @@ final class HealthViewModel {
     var steps: Int { healthKit.steps }
     var activeEnergyKcal: Double { healthKit.activeEnergyKcal }
     var exerciseMinutes: Int { healthKit.exerciseMinutes }
+    /// False when only steps are known (free-account build using the pedometer instead of HealthKit).
+    var hasEnergyAndExercise: Bool { healthKit.hasEnergyAndExercise }
 
     init(
         healthKit: HealthKitManager = .shared,
