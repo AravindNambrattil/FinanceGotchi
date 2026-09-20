@@ -20,8 +20,20 @@ def feed_all(classifier, samples, start=0.0, dt=0.05):
 
 class MotionTests(unittest.TestCase):
     def test_lift_after_sitting_still_is_a_pickup(self):
-        events = feed_all(pi.MotionClassifier(), [STILL] * 80 + [(0, 0, 1.4)] * 8)  # 4 s still, then a lift
+        events = feed_all(pi.MotionClassifier(), [STILL] * 80 + [(0, 0, 1.4)] * 12)  # 4 s still, then a 0.6 s lift
         self.assertEqual([k for _, k in events], ["PICKUP"])
+
+    def test_a_shake_that_takes_a_moment_to_get_going_is_not_also_a_pickup(self):
+        # Measured on the real board: the first ~0.3 s of a shake is gentle, then the hard jolts arrive.
+        slow_start = [STILL] * 80 + [(0, 0, 1.3)] * 6 + [(0, 0, 2.6), (0, 0, -0.6), (0, 0, 2.6)] + [(0, 0, 1.0)] * 20
+        events = [k for _, k in feed_all(pi.MotionClassifier(), slow_start)]
+        self.assertEqual(events, ["SHAKE"])
+
+    def test_carrying_with_brief_dips_is_still_move(self):
+        # Walking with it: mostly above 0.13 g, with short dips back to (near) still that must not restart the timer.
+        step = [(0, 0, 1.3)] * 4 + [(0, 0, 1.02)] * 3
+        events = feed_all(pi.MotionClassifier(), step * 6)
+        self.assertIn("MOVE", [k for _, k in events])
 
     def test_a_shake_that_starts_like_a_lift_is_a_shake_not_a_pickup(self):
         # Sitting still for 4 s, a couple of gentle samples as the hand grabs it, then a real shake.

@@ -22,6 +22,20 @@ things that talk to the actual parts.
 
 Then run it: `HARDWARE=grove python3 financegotchi_pi.py`.
 
+## Wired as built (`GroveHardware` is written)
+| Part | Where | Notes |
+| --- | --- | --- |
+| Grove RGB LCD | I2C `0x3E` text, `0x62` backlight | `lcd.py` |
+| Accelerometer | I2C `0x4C` (MMA7660, +/-1.5 g) | 21.33 counts per g |
+| FEED | GPIO 23 ("Care" button, to GND) | |
+| PLAY | GPIO 24 ("Next" button, to GND) | the original Play button was removed; it never worked |
+| PET | GPIO 17 (Grove touch sensor, HIGH when touched) | |
+| Buzzer | GPIO 18 (PWM) | |
+
+Override a pin with `FG_PIN_FEED`, `FG_PIN_PLAY`, `FG_PIN_PET`, `FG_PIN_BUZZER`. On the Pi the code lives in
+`~/FinanceGotchi/pi` and runs as the **user** service `financegotchi-pi` (`systemctl --user status financegotchi-pi`,
+`journalctl --user -u financegotchi-pi -f`; lingering is enabled so it starts at boot). Restart it after copying new code.
+
 ## Try it with no wiring first
 ```bash
 pip install -r requirements.txt

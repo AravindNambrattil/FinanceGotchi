@@ -1,1 +1,3 @@
 requests>=2.31
+smbus2; sys_platform == "linux"
+gpiozero; sys_platform == "linux"
