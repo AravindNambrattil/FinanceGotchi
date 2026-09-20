@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// First screen: what FinanceGotchi is, in the template's onboarding style (bright hero, teal panel).
+/// First screen: what Mochi is, in the template's onboarding style (bright hero, teal panel).
 struct LandingView: View {
     var onStart: () -> Void
     var onSignIn: () -> Void
@@ -56,7 +56,7 @@ struct LandingView: View {
     private var panel: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                Text("FinanceGotchi")
+                Text("Mochi")
                     .font(.system(.subheadline, design: .rounded, weight: .bold))
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)

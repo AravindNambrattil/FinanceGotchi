@@ -117,7 +117,7 @@ class GroveHardware(Hardware):
       Motion   the 3-axis digital accelerometer is I2C. Read x, y, z and convert to g so a still board reads about 1.0
                total. Check which chip it is (e.g. MMA7660 or ADXL345) and scale accordingly.
 
-    Wire it, then run `HARDWARE=grove python3 financegotchi_pi.py`.
+    Wire it, then run `HARDWARE=grove python3 mochi_pi.py`.
     """
 
     def __init__(self):

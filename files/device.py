@@ -1,4 +1,4 @@
-"""Physical-pet (Raspberry Pi) endpoints for FinanceGotchi. Put this next to main.py and db.py.
+"""Physical-pet (Raspberry Pi) endpoints for Mochi. Put this next to main.py and db.py.
 
 The Pi polls one endpoint for everything it needs and never talks to Nessie:
 

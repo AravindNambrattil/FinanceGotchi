@@ -1,7 +1,7 @@
 """Run:  python3 -m unittest -v test_pi     (no hardware or network needed)"""
 import unittest
 
-import financegotchi_pi as pi
+import mochi_pi as pi
 import hardware
 
 STILL = (0.0, 0.0, 1.0)

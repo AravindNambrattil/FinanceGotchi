@@ -1,4 +1,4 @@
-"""Capital One Nessie client for FinanceGotchi.
+"""Capital One Nessie client for Mochi.
 
 Put your key in a file called .env next to this file:
     NESSIE_API_KEY=your-key-here
@@ -148,7 +148,7 @@ def transfer(from_id, to_id, amount, description):
     return in_id or out_id
 
 
-# ---------- FinanceGotchi helpers (use the local SQLite conn) ----------
+# ---------- Mochi helpers (use the local SQLite conn) ----------
 def pet_accounts(conn, pet_id):
     """Nessie IDs saved on the pet row by setup_nessie.py, or None."""
     row = conn.execute(

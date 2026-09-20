@@ -62,7 +62,7 @@ struct PetView: View {
     // MARK: - Top Bar
     private func topBar(pet: PetState) -> some View {
         HStack(spacing: 10) {
-            Text("FinanceGotchi")
+            Text("Mochi")
                 .font(.system(.subheadline, design: .rounded, weight: .bold))
                 .foregroundStyle(Theme.ink)
                 .padding(.horizontal, 16)

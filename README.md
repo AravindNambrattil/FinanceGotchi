@@ -1,8 +1,8 @@
-# FinanceGotchi
+# Mochi
 Absolutely. Here is the same updated plan, but with the soccer theme completely removed. This version treats the project purely as a physical financial-wellbeing companion.
-VTHacks 14 — FinanceGotchi Project Plan
+VTHacks 14 — Mochi Project Plan
 1. Core idea
-We are building FinanceGotchi, a physical Tamagotchi-style companion designed to teach and encourage financial wellbeing through everyday decisions.
+We are building Mochi, a physical Tamagotchi-style companion designed to teach and encourage financial wellbeing through everyday decisions.
 The physical pet stays continuously connected to a companion phone app.
 The user's financial decisions affect the pet's:
     •    Mood
@@ -100,7 +100,7 @@ The most important simplification is:
 ESP32 ↔ Phone ↔ Backend ↔ Nessie
 The ESP32 should not talk directly to Nessie.
 
-4. Physical FinanceGotchi
+4. Physical Mochi
 The physical device should remain simple.
 Its responsibilities:
 Display pet
@@ -284,7 +284,7 @@ Backend
 Nessie
  ↓
 financial state updates
-Then FinanceGotchi reacts.
+Then Mochi reacts.
 
 8. Financial-wellbeing logic
 Keep the system small.
@@ -386,7 +386,7 @@ It should not affect financial wellbeing directly.
 
 11. Two-pet interaction
 Social interaction is now a small bonus feature.
-Two FinanceGotchis can:
+Two Mochis can:
 recognize each other
 
 say hello
@@ -464,7 +464,7 @@ Additional male-to-male wires
 You also have a soldering iron.
 
 13. Hardware actually needed
-For each physical FinanceGotchi, target:
+For each physical Mochi, target:
 1 × ESP32-S3
 1 × RGB LCD
 1 × 3-axis movement sensor
@@ -788,4 +788,4 @@ persistent state
 interactive digital companion
 without needing a sports theme at all.
 One-sentence pitch
-FinanceGotchi is a physical financial companion that turns saving, budgeting, and everyday money decisions into something you can see, care for, and grow with.
+Mochi is a physical financial companion that turns saving, budgeting, and everyday money decisions into something you can see, care for, and grow with.

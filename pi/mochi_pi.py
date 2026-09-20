@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""FinanceGotchi physical pet (Raspberry Pi 4B).
+"""Mochi physical pet (Raspberry Pi 4B).
 
-Talks only to the FinanceGotchi server over HTTPS (Wi-Fi). It never talks to Nessie and never talks to the phone.
+Talks only to the Mochi server over HTTPS (Wi-Fi). It never talks to Nessie and never talks to the phone.
 
     every ~2 s   GET  /pets/{id}/device/state?device=pi    stats + recent events (also counts as a heartbeat)
     on a button  POST /pets/{id}/interact                  feed | play | pet
     on motion    POST /pets/{id}/movement                  PICKUP | SHAKE | MOVE | IDLE (rate limited!)
 
-Run on a laptop:   python3 financegotchi_pi.py                 (console hardware, keyboard keys)
-Run on the Pi:     HARDWARE=grove python3 financegotchi_pi.py
+Run on a laptop:   python3 mochi_pi.py                 (console hardware, keyboard keys)
+Run on the Pi:     HARDWARE=grove python3 mochi_pi.py
 
 Settings (environment variables):  FG_SERVER, FG_PET, HARDWARE, FG_RUN_SECONDS (auto-exit, for testing)
 """
@@ -245,7 +245,7 @@ def run(server: Server, hw: hardware.Hardware, seconds: Optional[float] = None, 
 
 
 if __name__ == "__main__":
-    print(f"FinanceGotchi pet -> {SERVER}/pets/{PET_ID}   (hardware: {os.environ.get('HARDWARE', 'console')})")
+    print(f"Mochi pet -> {SERVER}/pets/{PET_ID}   (hardware: {os.environ.get('HARDWARE', 'console')})")
     seconds = float(os.environ["FG_RUN_SECONDS"]) if "FG_RUN_SECONDS" in os.environ else None
     try:
         run(Server(), hardware.load(os.environ.get("HARDWARE", "console")), seconds)

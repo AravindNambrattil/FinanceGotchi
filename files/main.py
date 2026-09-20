@@ -1,4 +1,4 @@
-"""FinanceGotchi API. Put this next to db.py, nessie.py and schema.sql.
+"""Mochi API. Put this next to db.py, nessie.py and schema.sql.
 
 Run:  python -m uvicorn main:app --reload
 Docs: http://127.0.0.1:8000/docs
@@ -18,7 +18,7 @@ import todos
 
 DB_FILE = str(Path(__file__).with_name("financegotchi.db"))
 
-app = FastAPI(title="FinanceGotchi API")
+app = FastAPI(title="Mochi API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 app.include_router(todos.router)
 app.include_router(device.router)

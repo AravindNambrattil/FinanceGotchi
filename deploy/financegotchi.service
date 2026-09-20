@@ -1,5 +1,5 @@
 [Unit]
-Description=FinanceGotchi API
+Description=Mochi API
 After=network.target
 
 [Service]

@@ -1,7 +1,7 @@
 import Foundation
 import Observation
 
-/// Central configuration for the FinanceGotchi app.
+/// Central configuration for the Mochi app.
 @Observable
 class AppSettings {
     static let shared = AppSettings()

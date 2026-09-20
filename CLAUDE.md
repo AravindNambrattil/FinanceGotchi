@@ -1,6 +1,6 @@
-# FinanceGotchi — CLAUDE.md
+# Mochi — CLAUDE.md
 
-FinanceGotchi is a physical Tamagotchi-style companion (VTHacks 14) that teaches financial wellbeing through everyday
+Mochi is a physical Tamagotchi-style companion (VTHacks 14) that teaches financial wellbeing through everyday
 money decisions. The full project plan lives in `README.md`; this file records the goals and the rules that matter when
 changing code here.
 
@@ -286,7 +286,7 @@ Everything for it lives in `pi/`; `pi/README.md` is the handoff for whoever wire
   - `GET /pets/{id}/device` -> `{connected, lastSync, secondsAgo}`. Online means a heartbeat within the last 20 s.
     Use this, not the `connected` field in the pet JSON (that column is set once and never expires).
   - It returns several events instead of one so two things in the same second can't hide each other.
-- **Pi side:** `pi/financegotchi_pi.py` (network + logic, tested) and `pi/hardware.py`. `ConsoleHardware` runs anywhere;
+- **Pi side:** `pi/mochi_pi.py` (network + logic, tested) and `pi/hardware.py`. `ConsoleHardware` runs anywhere;
   `GroveHardware` is the part the hardware teammate writes. Tests: `python3 -m unittest -v pi/test_pi.py` from `pi/`.
 - **Activity data (app):** the project is signed with a **free personal team**, which cannot use HealthKit (Xcode errors:
   "Personal development teams ... HealthKit"). So `HealthKitManager` falls back to CoreMotion's pedometer (steps only,
@@ -498,7 +498,7 @@ Everything for it lives in `pi/`; `pi/README.md` is the handoff for whoever wire
   - `GET /pets/{id}/device` -> `{connected, lastSync, secondsAgo}`. Online means a heartbeat within the last 20 s.
     Use this, not the `connected` field in the pet JSON (that column is set once and never expires).
   - It returns several events instead of one so two things in the same second can't hide each other.
-- **Pi side:** `pi/financegotchi_pi.py` (network + logic, tested) and `pi/hardware.py`. `ConsoleHardware` runs anywhere;
+- **Pi side:** `pi/mochi_pi.py` (network + logic, tested) and `pi/hardware.py`. `ConsoleHardware` runs anywhere;
   `GroveHardware` is the part the hardware teammate writes. Tests: `python3 -m unittest -v pi/test_pi.py` from `pi/`.
 - **Apple Health (app):** needs `INFOPLIST_KEY_NSHealthShareUsageDescription` and `Healthbuddy.entitlements` (HealthKit) in the
   project; without them `HealthKitManager.canUseHealthKit` is false and the Connect button silently does nothing.

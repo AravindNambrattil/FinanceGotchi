@@ -1,4 +1,4 @@
-"""To-do list feature for FinanceGotchi. Put this next to main.py and db.py.
+"""To-do list feature for Mochi. Put this next to main.py and db.py.
 
 Financial to-dos ("Pay phone bill", "Save $20 for laptop"). Finishing one gives Mochi a small
 boost. The table creates itself the first time it's used, so no other file needs changing.
