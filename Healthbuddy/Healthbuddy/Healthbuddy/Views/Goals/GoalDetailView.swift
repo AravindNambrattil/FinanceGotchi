@@ -9,6 +9,8 @@ struct GoalDetailView: View {
     @State private var showContribution = false
     @State private var editorMode: GoalEditorView.Mode?
     @State private var confirmDelete = false
+    /// AI-written suggestion for this goal. Absent until (and unless) the AI answers.
+    @State private var advice: String?
 
     private var goal: Goal? { goalsVM.goal(id: goalId) }
     private var log: [Contribution] { goalsVM.contributions[goalId] ?? [] }
@@ -77,6 +79,11 @@ struct GoalDetailView: View {
         .task {
             if goalsVM.snapshot.goals.isEmpty { await goalsVM.load() }
             await goalsVM.loadContributions(goalId: goalId)
+        }
+        // Re-ask whenever the balance changes, since the advice depends on the numbers.
+        .task(id: goal?.current) {
+            guard let goal, goal.status == .active else { return }
+            advice = await AIWriter.shared.text(kind: .goal, facts: goal.aiFacts)
         }
     }
 
@@ -161,6 +168,17 @@ struct GoalDetailView: View {
                         .opacity(0.85)
                 }
                 Spacer(minLength: 0)
+            }
+
+            if let advice, goal.status == .active {
+                Label(advice, systemImage: "sparkles")
+                    .font(.system(.subheadline, design: .rounded))
+                    .labelStyle(TopAlignedLabelStyle())
+                    .accessibilityLabel("AI-written suggestion. \(advice)")
+                Text("AI-written")
+                    .font(.system(.caption2, design: .rounded))
+                    .opacity(0.6)
+                    .padding(.top, -8)
             }
 
             if goal.status == .active {
@@ -258,6 +276,16 @@ extension View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(goalsVM.errorMessage ?? "")
+        }
+    }
+}
+
+/// Icon at the top-left with wrapped text beside it.
+struct TopAlignedLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            configuration.icon
+            configuration.title.fixedSize(horizontal: false, vertical: true)
         }
     }
 }

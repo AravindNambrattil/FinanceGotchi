@@ -21,12 +21,19 @@ enum APIError: LocalizedError {
 actor APIClient {
     static let shared = APIClient()
     private let session: URLSession
+    /// AI answers can take several seconds (the model runs on the server's CPU), so they get a longer leash.
+    private let slowSession: URLSession
 
     private init() {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 10
         config.timeoutIntervalForResource = 15
         session = URLSession(configuration: config)
+
+        let slow = URLSessionConfiguration.default
+        slow.timeoutIntervalForRequest = 35
+        slow.timeoutIntervalForResource = 40
+        slowSession = URLSession(configuration: slow)
     }
 
     // MARK: - GET
@@ -41,9 +48,10 @@ actor APIClient {
     func post<Body: Encodable, Response: Decodable>(
         _ path: String,
         body: Body,
-        baseURL: URL
+        baseURL: URL,
+        slow: Bool = false
     ) async throws -> Response {
-        try await send("POST", path, body: body, baseURL: baseURL)
+        try await send("POST", path, body: body, baseURL: baseURL, slow: slow)
     }
 
     // MARK: - PUT
@@ -52,7 +60,7 @@ actor APIClient {
         body: Body,
         baseURL: URL
     ) async throws -> Response {
-        try await send("PUT", path, body: body, baseURL: baseURL)
+        try await send("PUT", path, body: body, baseURL: baseURL, slow: false)
     }
 
     // MARK: - DELETE
@@ -77,7 +85,8 @@ actor APIClient {
         _ method: String,
         _ path: String,
         body: Body,
-        baseURL: URL
+        baseURL: URL,
+        slow: Bool
     ) async throws -> Response {
         let url = baseURL.appendingPathComponent(path)
         var request = URLRequest(url: url)
@@ -85,7 +94,7 @@ actor APIClient {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONCoding.makeEncoder().encode(body)
 
-        let (data, response) = try await fetch(urlRequest: request)
+        let (data, response) = try await fetch(urlRequest: request, using: slow ? slowSession : session)
         try validate(response: response)
         return try decode(data)
     }
@@ -99,9 +108,9 @@ actor APIClient {
         }
     }
 
-    private func fetch(urlRequest: URLRequest) async throws -> (Data, URLResponse) {
+    private func fetch(urlRequest: URLRequest, using session: URLSession? = nil) async throws -> (Data, URLResponse) {
         do {
-            return try await session.data(for: urlRequest)
+            return try await (session ?? self.session).data(for: urlRequest)
         } catch {
             throw mapNetworkError(error)
         }

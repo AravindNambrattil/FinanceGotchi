@@ -19,11 +19,21 @@ struct DecisionResultOverlay: View {
                         milestone: viewModel.lastGoal?.milestone ?? .starting,
                         size: 96
                     )
-                    Text(message)
-                        .font(.system(.headline, design: .rounded))
-                        .foregroundStyle(Theme.ink)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 24)
+                    // The built-in message shows immediately; the AI's sentence replaces it if and when it arrives.
+                    VStack(spacing: 6) {
+                        Text(viewModel.aiMessage ?? message)
+                            .font(.system(.headline, design: .rounded))
+                            .foregroundStyle(Theme.ink)
+                            .multilineTextAlignment(.center)
+                            .contentTransition(.opacity)
+                        if viewModel.aiMessage != nil {
+                            Label("AI-written", systemImage: "sparkles")
+                                .font(.system(.caption2, design: .rounded))
+                                .foregroundStyle(Theme.inkSecondary)
+                        }
+                    }
+                    .padding(.horizontal, 24)
+                    .animation(.easeInOut(duration: 0.35), value: viewModel.aiMessage)
 
                     if let goal = viewModel.lastGoal, let before = viewModel.progressBeforeLastSave {
                         SaveResultBar(goal: goal, before: before, added: viewModel.lastContribution?.amount ?? 0)

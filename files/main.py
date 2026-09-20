@@ -10,6 +10,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+import ai
 import db
 import nessie
 import device
@@ -21,6 +22,7 @@ app = FastAPI(title="FinanceGotchi API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 app.include_router(todos.router)
 app.include_router(device.router)
+app.include_router(ai.router)
 
 
 @app.on_event("startup")

@@ -188,6 +188,7 @@ and uvicorn calls Nessie over HTTPS. The database is a file, so there is no conn
 | Backups | `/opt/financegotchi/backups/` (nightly 03:00, 14 days, same disk) |
 | Service | `systemd` unit `financegotchi`, runs as the `financegotchi` user, **one worker on purpose** (SQLite has one writer) |
 | Firewall | server `ufw` allows only 22, 80, 443 (Vultr's own firewall group is not used) |
+| AI model | Ollama (`ollama` service) with `qwen2.5:3b`, bound to `127.0.0.1:11434` only; see "AI-written text" |
 
 Everyday commands:
 
@@ -287,6 +288,9 @@ Everything for it lives in `pi/`; `pi/README.md` is the handoff for whoever wire
   - It returns several events instead of one so two things in the same second can't hide each other.
 - **Pi side:** `pi/financegotchi_pi.py` (network + logic, tested) and `pi/hardware.py`. `ConsoleHardware` runs anywhere;
   `GroveHardware` is the part the hardware teammate writes. Tests: `python3 -m unittest -v pi/test_pi.py` from `pi/`.
+- **Apple Health (app):** needs `INFOPLIST_KEY_NSHealthShareUsageDescription` and `Healthbuddy.entitlements` (HealthKit) in the
+  project; without them `HealthKitManager.canUseHealthKit` is false and the Connect button silently does nothing.
+- **Tab bar:** `FloatingTabBar` sits in a `VStack` under the `TabView`. `safeAreaInset` on the `TabView` does not inset tab content on iOS 26, which hid the bottom-most buttons.
 - **App side:** `PetService.fetchDeviceStatus` and the "Physical Mochi" card on the Pet tab (polls every 5 s). Demo mode
   shows a connected demo pet.
 - **Rate limiting is essential.** Each `/movement` POST changes stats (SHAKE -2 mood, -3 energy; MOVE +5 energy; PICKUP
@@ -299,3 +303,54 @@ Everything for it lives in `pi/`; `pi/README.md` is the handoff for whoever wire
 - Verified: 24 unit tests, an end-to-end run of the Pi client against a local server (feed, shake, pickup, save,
   unexpected expense), and the app's card flipping from "Last seen" to "Connected just now" while the client ran against
   the live server. **Not verified:** anything on real Pi hardware.
+
+## AI-written text
+
+A fourth surface, **Chat with Mochi** (Pet tab card -> sheet, `Views/Chat/ChatView.swift`, `ChatViewModel`), was added at the
+user's request even though free-form chat was avoided at first. It is fenced in: `POST /pets/{id}/ai/chat`
+`{message, facts, history}` answers only from facts the app sends, runs the same number/tone/no-advice/emoji checks, and
+questions about investing, crypto, tax, loans, insurance or gambling get a fixed reply without reaching the model. On
+failure the app shows a built-in fallback line. Live-tested: 2-5 s per answer.
+
+Three places show a sentence written by an AI, always labelled "AI-written", and always *in addition to* built-in text
+(nothing on screen depends on the AI):
+1. the result card after a **Save It** (replaces the built-in line if it arrives, a few seconds later),
+2. a "Recent activity" card at the top of the **Money** tab,
+3. a suggestion on a **goal's detail** screen.
+
+**Where it runs:** Ollama + Qwen2.5 3B on the same Vultr VM. Ollama listens only on `127.0.0.1:11434` (not on the
+internet), so there is no API key and no third-party service. Set up by `deploy/setup-ollama.sh` (installs Ollama, pins
+the model in memory, `Nice=10` so the API stays responsive). Server code: `files/ai.py`, hooked into `main.py`.
+- `POST /pets/{id}/ai/text` `{kind: decision|insight|goal|tips, facts: {...}}` -> `{text, lines, reason, cached, ms}`.
+  `text` is `null` when the model is slow, busy, down, or its answer failed the checks; the app then just shows built-in text.
+- `GET /pets/{id}/ai/status` -> `{enabled, model, available}`.
+- Settings in the server `.env` (optional): `AI_ENABLED=0` turns it off, `AI_MODEL`, `AI_TIMEOUT` (default 25 s).
+- App: `Services/AIWriter.swift` (sends facts, caches, returns nil in demo mode), `Components/AITextCard.swift`,
+  `FinancialViewModel` (decision + insight), `GoalDetailView` (advice). The AI also works in demo mode (it needs the server only for the sentence), which is the safe way to test Save It repeatedly without using the live offer or moving Nessie money.
+
+**The model never decides anything and never does maths.** The app sends finished facts; the model writes a sentence
+around them. Facts follow a naming convention so the checker knows what each number means: `*_usd` dollars, `*_pct`
+percentages, `*_days | *_weeks | *_count` plain counts, plus a plain-English `summary` of exactly what happened
+(this anchors the model far better than an event label). Every answer is checked before it is used:
+- every `$` amount, `%` value and bare number must appear in the facts *and* be the right kind (a "$40" fact can never
+  come back as "40%"); the checker is deliberately strict, so a correct but unlisted calculation is rejected too;
+- meaning: a deferral or purchase can't mention saving, a covered expense can't say "not covered", etc.;
+- tone (the product rule of never judging spending): praise is allowed only after a save, results and insights give no
+  advice, no "but" after a purchase, no lectures or guilt-trips, no "almost there" unless the goal is 75%+ funded;
+- length, no markdown/links. A rejected answer is retried up to 3 times with the reason fed back; results are cached 10 min;
+  one request runs at a time (others get "busy" rather than queueing).
+
+**What was measured (and why the scope is small):**
+- 3B is the right size: ~2-8 s per answer. 7B was more than twice as slow and *not* better (it wrote things like
+  "Added $25 to your wants" and "focus on replenishing it now"); 1.5B wrote nonsense. No GPU on this VM.
+- Even with the checks, a 3B model needs guarding: it invented numbers, claimed money was "saved" on a deferral, called a
+  fund "fully funded" at 19%, and moralised after purchases. Each fix uncovered a new phrase, so **do not loosen the
+  checks to raise the hit rate** and don't add free-form chat: that is where wrong or judgemental money advice comes from.
+- Roughly 2 in 3 saves, and most insights and goal suggestions, get through. For purchases and deferrals the model mostly
+  repeated the facts back and carried the most risk, so **the app only asks the AI after a save**; those keep the
+  built-in message. The `tips` kind exists on the server but the app doesn't use it (open-ended advice was the least
+  reliable output).
+- Latency: results are asynchronous. The built-in text shows immediately; the AI text swaps in when ready or never.
+
+Tests: `python3 -m unittest -v test_ai` from `files/` (44 tests; the model is faked). The first request after an API
+restart is slower while the model loads; `ai.py` warms it up on startup. Logs: `journalctl -u ollama`, `journalctl -u financegotchi`.

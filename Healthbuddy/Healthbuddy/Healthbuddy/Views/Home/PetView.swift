@@ -5,6 +5,8 @@ struct PetView: View {
     var healthVM: HealthViewModel
     /// Called by the "See all" link; the parent switches to the Goals tab.
     var onSeeAll: () -> Void = {}
+    /// Called by the "Chat with Mochi" card; the parent presents the chat sheet.
+    var onChat: () -> Void = {}
 
     var body: some View {
         NavigationStack {
@@ -20,6 +22,7 @@ struct PetView: View {
                             topBar(pet: pet)
                             ScreenHeader(title: "Hi, I'm \(pet.name)", subtitle: pet.message)
                             heroStage(pet: pet)
+                            chatCard(pet: pet)
                             deviceCard
                             moodCard(pet: pet)
                             workOnSection(pet: pet)
@@ -109,6 +112,33 @@ struct PetView: View {
         }
         .frame(maxWidth: .infinity)
         .frame(height: 250)
+    }
+
+    // MARK: - Chat
+    private func chatCard(pet: PetState) -> some View {
+        Button(action: onChat) {
+            HStack(spacing: 12) {
+                IconTile(systemImage: "bubble.left.and.text.bubble.right.fill", fill: Theme.sky.opacity(0.7), size: 40)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Chat with \(pet.name)")
+                        .font(Theme.label)
+                        .foregroundStyle(Theme.ink)
+                    Text("Ask about saving, health or your day")
+                        .font(Theme.caption)
+                        .foregroundStyle(Theme.inkSecondary)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.bold))
+                    .foregroundStyle(Theme.inkSecondary)
+                    .accessibilityHidden(true)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .mellowCard(elevated: true)
+            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).strokeBorder(Theme.separator, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Physical pet

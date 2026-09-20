@@ -23,6 +23,13 @@ final class FinancialViewModel {
     var milestoneCrossed: GoalMilestone?
     var latestPetState: PetState?
 
+    /// AI-written sentence about the last decision. It arrives a few seconds after the built-in message, or never.
+    var aiMessage: String?
+    /// AI-written summary of recent activity for the Money tab.
+    var insight: String?
+    @ObservationIgnored private var aiToken = UUID()
+    @ObservationIgnored private var insightKey: String?
+
     @ObservationIgnored private let service: PetServiceProtocol
     @ObservationIgnored private let settings: AppSettings
 
@@ -41,6 +48,19 @@ final class FinancialViewModel {
             errorMessage = error.localizedDescription
         }
         isLoading = false
+        Task { await loadInsight() }
+    }
+
+    // MARK: - AI insight
+    func loadInsight() async {
+        guard let facts = transactions.aiInsightFacts else {
+            insight = nil
+            return
+        }
+        let key = facts.keys.sorted().map { "\($0)=\(facts[$0]!.canonical)" }.joined(separator: ";")
+        if key == insightKey, insight != nil { return }
+        insightKey = key
+        insight = await AIWriter.shared.text(kind: .insight, facts: facts)
     }
 
     // MARK: - Load Offer
@@ -84,6 +104,21 @@ final class FinancialViewModel {
             lastGoal = response.goal
             milestoneCrossed = response.milestoneCrossed
             latestPetState = response.petState
+
+            // Ask the AI for a sentence about this decision, without making the result card wait for it.
+            let token = UUID()
+            aiToken = token
+            aiMessage = nil
+            // Only for a save. For a purchase or a deferral the AI mostly repeated the facts back and carried the most
+            // risk of judging, so those keep their built-in message.
+            let facts = Self.decisionFacts(action: action, offer: offer, goal: response.goal)
+            if !facts.isEmpty {
+                Task { [weak self] in
+                    let text = await AIWriter.shared.text(kind: .decision, facts: facts)
+                    if let self, self.aiToken == token { self.aiMessage = text }
+                }
+            }
+
             await loadOffer()   // the server resolves the offer; ask what Mochi wants next
             await loadTransactions()
         } catch {
@@ -98,7 +133,31 @@ final class FinancialViewModel {
         return min(max((goal.current - contribution.amount) / max(goal.target, 0.01), 0), 1)
     }
 
+    /// What actually happened, in plain words plus checked numbers. The summary keeps the model from guessing.
+    /// Empty means "don't ask the AI".
+    private static func decisionFacts(action: String, offer: Offer, goal: Goal?) -> [String: AIFact] {
+        let amount = Money.string(offer.cost)
+        switch action {
+        case "save_instead":
+            guard let goal else { return [:] }
+            return [
+                "event": .text("save"),
+                "summary": .text("Saved \(amount) for the \(goal.name) goal instead of buying \(offer.title)."),
+                "amount_usd": .number(offer.cost),
+                "goal": .text(goal.name),
+                "goal_saved_usd": .number(goal.current.rounded()),
+                "goal_target_usd": .number(goal.target.rounded()),
+                "goal_pct": .number(Double(goal.progressPercent)),
+                "goal_remaining_usd": .number(goal.remaining.rounded()),
+            ]
+        default:
+            return [:]   // purchases and deferrals keep their built-in message
+        }
+    }
+
     func clearDecisionResult() {
+        aiToken = UUID()
+        aiMessage = nil
         decisionResult = nil
         selectedAction = nil
         lastContribution = nil
