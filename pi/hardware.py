@@ -8,9 +8,11 @@
 `ConsoleHardware` needs no wiring: it prints the LCD to the terminal and reads the keyboard, so the whole client
 can be run and tested on a laptop. `GroveHardware` is the part to fill in on the Pi.
 """
+import os
 import queue
 import sys
 import threading
+import time
 from typing import List, Optional, Tuple
 
 Sample = Tuple[float, float, float]  # accelerometer reading in g (1.0 g = standing still)
@@ -106,22 +108,103 @@ class ConsoleHardware(Hardware):
         self.display, self.buzzer, self.inputs = ConsoleDisplay(), ConsoleBuzzer(), ConsoleInputs()
 
 
-# ---------------------------------------------------------------- the real thing (TO DO on the Pi)
+# ---------------------------------------------------------------- the real thing (Raspberry Pi 4B)
+# Wiring (BCM GPIO numbers). Override any of them with FG_PIN_<NAME>, e.g. FG_PIN_PLAY=25.
+PINS = {"FEED": 23, "PLAY": 24, "PET": 17, "BUZZER": 18}  # FEED=Care button, PLAY=Next button, PET=touch sensor
+MMA7660_ADDR = 0x4C  # Grove 3-axis accelerometer, +/-1.5 g, 21.33 counts per g
+
+TUNES = {  # (Hz, seconds)
+    "click":     [(880, 0.05)],
+    "happy":     [(660, 0.08), (880, 0.08), (1100, 0.12)],
+    "relief":    [(523, 0.08), (784, 0.12)],
+    "celebrate": [(523, 0.1), (659, 0.1), (784, 0.1), (1047, 0.1), (784, 0.1), (1047, 0.3)],
+    "wait":      [(700, 0.08), (700, 0.08)],
+    "sad":       [(440, 0.2), (349, 0.35)],
+}
+
+
+def _pin(name: str) -> int:
+    return int(os.environ.get(f"FG_PIN_{name}", PINS[name]))
+
+
+class GroveDisplay(Display):
+    def __init__(self, bus):
+        from lcd import GroveLCD
+        self._lcd = GroveLCD(bus)
+
+    def show(self, line1, line2, rgb=(255, 255, 255)):
+        self._lcd.color(*rgb)
+        self._lcd.line(0, line1[:16])
+        self._lcd.line(1, line2[:16])
+
+
+class GroveBuzzer(Buzzer):
+    def __init__(self, pin):
+        from gpiozero import PWMOutputDevice
+        self._dev = PWMOutputDevice(pin, frequency=440, initial_value=0)
+        self._lock = threading.Lock()
+
+    def play(self, sound):
+        if sound in TUNES:  # never block the main loop
+            threading.Thread(target=self._play, args=(TUNES[sound],), daemon=True).start()
+
+    def _play(self, notes):
+        if not self._lock.acquire(blocking=False):
+            return  # already playing something
+        try:
+            for freq, seconds in notes:
+                self._dev.frequency = freq
+                self._dev.value = 0.5
+                time.sleep(seconds)
+                self._dev.value = 0
+                time.sleep(0.02)
+        finally:
+            self._dev.value = 0
+            self._lock.release()
+
+
+class GroveInputs(Inputs):
+    def __init__(self, bus):
+        from gpiozero import Button
+        self._bus = bus
+        self._presses: "queue.Queue[str]" = queue.Queue()
+        self._buttons = []
+        for name in BUTTONS:
+            # FEED and PLAY are push buttons to GND; PET is the Grove touch sensor, which outputs HIGH when touched.
+            b = Button(_pin(name), pull_up=name != "PET", bounce_time=0.1 if name == "PET" else 0.05)
+            b.when_pressed = lambda n=name: self._presses.put(n)
+            self._buttons.append(b)
+        for reg, val in ((0x07, 0x00), (0x08, 0x00), (0x07, 0x01)):  # standby, 120 samples/s, active
+            self._bus.write_byte_data(MMA7660_ADDR, reg, val)
+        self._last: Optional[Sample] = None
+
+    def buttons(self):
+        found = []
+        while not self._presses.empty():
+            found.append(self._presses.get())
+        return found
+
+    def motion(self):
+        try:
+            raw = self._bus.read_i2c_block_data(MMA7660_ADDR, 0x00, 3)
+        except OSError:
+            return self._last
+        if any(v & 0x40 for v in raw):  # bit 6 = reading was being updated; keep the previous good sample
+            return self._last
+        axes = [(v & 0x3F) - 64 if v & 0x20 else v & 0x3F for v in raw]
+        self._last = tuple(a / 21.33 for a in axes)
+        return self._last
+
+
 class GroveHardware(Hardware):
-    """Fill this in on the Raspberry Pi 4B. Suggested building blocks (check what your modules actually are):
-
-      Display  Grove RGB LCD is I2C. Text is usually at address 0x3e and the backlight at 0x62. `smbus2` works, or the
-               `grove.py` / `rpi_lcd` libraries. Two lines of 16 characters, so keep text short.
-      Buzzer   a GPIO pin. `gpiozero.TonalBuzzer` (or `Buzzer` for plain on/off) plays the patterns.
-      Buttons  GPIO inputs with pull-ups. `gpiozero.Button`. Map them to FEED / PLAY / PET.
-      Motion   the 3-axis digital accelerometer is I2C. Read x, y, z and convert to g so a still board reads about 1.0
-               total. Check which chip it is (e.g. MMA7660 or ADXL345) and scale accordingly.
-
-    Wire it, then run `HARDWARE=grove python3 financegotchi_pi.py`.
-    """
+    """Grove RGB LCD (I2C 0x3E/0x62), MMA7660 accelerometer (I2C 0x4C), buzzer, two buttons and a touch sensor."""
 
     def __init__(self):
-        raise NotImplementedError("GroveHardware isn't written yet. Run with HARDWARE=console to try the client first.")
+        from smbus2 import SMBus
+        bus = SMBus(1)
+        self.display = GroveDisplay(bus)
+        self.buzzer = GroveBuzzer(_pin("BUZZER"))
+        self.inputs = GroveInputs(bus)
 
 
 def load(name: str) -> Hardware:

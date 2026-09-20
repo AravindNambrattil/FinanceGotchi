@@ -90,21 +90,36 @@ class MotionClassifier:
     some Grove accelerometers only measure up to +/-1.5 g, and SHAKE_G must be reachable by your sensor.
     """
 
+    # Tuned on the real MMA7660 (+/-1.5 g, 0.047 g per count): still noise peaks near 0.10 g, a hard shake reads
+    # 1.0-1.57 g, a gentle lift peaks around 0.45 g, and carrying it about sits at 0.1-0.3 g with brief dips.
     SHAKE_G, SHAKE_HITS, SHAKE_WINDOW = 1.0, 2, 1.0   # two hard jolts (2 g total force) within a second
-    STILL_G, STILL_SECONDS = 0.08, 3.0                # "still" = within 0.08 g of 1 g for 3 s
-    PICKUP_G, PICKUP_DELAY = 0.25, 0.2                # a gentle lift after being still, confirmed after 0.2 s
-    MOVE_G, MOVE_SECONDS = 0.15, 1.0                  # steady movement for a second
+    STILL_G, STILL_SECONDS = 0.11, 3.0                # "still" = within 0.11 g of 1 g for 3 s
+    PICKUP_G, PICKUP_DELAY = 0.2, 0.5                 # a gentle lift after being still, confirmed after 0.5 s
+    MOVE_G, MOVE_SECONDS, MOVE_GAP = 0.13, 1.0, 0.6   # steady movement for a second; dips shorter than 0.6 s are ok
     IDLE_SECONDS = 30.0                               # untouched for 30 s
 
     def __init__(self):
         self.jolts: List[float] = []
         self.still_since: Optional[float] = None
         self.moving_since: Optional[float] = None
+        self.last_active = -1e9                 # last time the force was at least MOVE_G from gravity
         self.pickup_at: Optional[float] = None  # a possible pickup, held briefly in case it turns into a shake
         self.armed = False                      # was still long enough that the next lift counts as a pickup
 
     def _reset(self):
         self.jolts, self.still_since, self.moving_since, self.pickup_at, self.armed = [], None, None, None, False
+
+    def _steady_movement(self, t: float, dev: float) -> bool:
+        if dev >= self.MOVE_G:
+            self.last_active = t
+            if self.moving_since is None:
+                self.moving_since = t
+            elif t - self.moving_since >= self.MOVE_SECONDS:
+                self.moving_since = t
+                return True
+        elif self.moving_since is not None and t - self.last_active > self.MOVE_GAP:
+            self.moving_since = None
+        return False
 
     def feed(self, t: float, sample) -> Optional[str]:
         x, y, z = sample
@@ -123,8 +138,9 @@ class MotionClassifier:
             self.pickup_at, self.armed, self.still_since = None, False, None
             return "PICKUP"
 
+        moved = self._steady_movement(t, dev)
+
         if dev <= self.STILL_G:
-            self.moving_since = None
             if self.still_since is None:
                 self.still_since = t
             held = t - self.still_since
@@ -138,13 +154,7 @@ class MotionClassifier:
         self.still_since = None
         if dev >= self.PICKUP_G and self.armed and self.pickup_at is None:
             self.pickup_at = t
-        if dev >= self.MOVE_G:
-            if self.moving_since is None:
-                self.moving_since = t
-            elif t - self.moving_since >= self.MOVE_SECONDS:
-                self.moving_since = t
-                return "MOVE"
-        return None
+        return "MOVE" if moved else None
 
 
 class RateLimiter:

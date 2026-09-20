@@ -298,4 +298,6 @@ Everything for it lives in `pi/`; `pi/README.md` is the handoff for whoever wire
   the single demo offer. Run `files/` locally instead (see `pi/README.md`).
 - Verified: 24 unit tests, an end-to-end run of the Pi client against a local server (feed, shake, pickup, save,
   unexpected expense), and the app's card flipping from "Last seen" to "Connected just now" while the client ran against
-  the live server. **Not verified:** anything on real Pi hardware.
+  the live server. `GroveHardware` is written and running on the real Pi (`mochi.local`, user service
+  `financegotchi-pi`); the server sees it online. Verified on the real hardware: LCD, buzzer, buttons, touch sensor,
+  and motion thresholds (tuned against a recorded shake / lift / carry session; 26 unit tests). Wiring is in `pi/README.md`.
